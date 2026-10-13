@@ -1,0 +1,11 @@
+AndroidLiquidGlass / Backdrop
+Copyright 2025 Kyant
+https://github.com/Kyant0/AndroidLiquidGlass
+Reference commit: 65ab177e90e5c1d8c62e70cf7755841982da65f6 (kmp)
+
+The capsule signed-distance/refraction math in components/glass-lens.js is
+adapted from backdrop/internal/Shaders.kt under Apache-2.0. Modified for this
+application: AGSL was translated to JS-generated SVG displacement data;
+capsule-only geometry, bounded inward refraction, no dispersion/depth effect.
+LiquidBottomTabs and its interaction utilities informed the component design.
+This is a WebView adaptation, not the original native Compose implementation.

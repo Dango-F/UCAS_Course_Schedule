@@ -1,0 +1,25 @@
+/* Optional companion to glass-adaptive.js. No changes to lens geometry,
+   material progress, transforms or the user's clarity preference. */
+.glass-surface { transition:background-color 200ms ease,box-shadow 200ms ease; }
+.nav-item { transition:color 200ms ease; }
+.nav-item > .app-icon { transition:filter 200ms ease; }
+[data-glass-backdrop-tone="dark"] > .glass-bar > .glass-surface {
+  background:rgba(20,25,34,calc(var(--glass-surface-alpha,.06) + .07));
+  box-shadow:0 6px 18px #00000024,0 1px 4px #00000018,inset 0 1px 1px #ffffffa0,inset 0 -1px 1px #ffffff25;
+}
+/* Adapt the tint smoothly, without switching the entire lens exposure. */
+[data-glass-backdrop-tone="dark"] > .glass-bar > .glass-selection > view::before {
+  background:rgba(255,255,255,calc(var(--glass-selection-alpha,.04) + .025));
+}
+.nav-item[data-glass-backdrop-tone="dark"] { color:#f5f7fc; text-shadow:0 1px 2px #00000038; }
+/* Icons are SVG images with baked-in stroke colours. Filter only the icon,
+   never the label, selector or background lens; retain the existing SVGs. */
+.nav-item[data-glass-backdrop-tone="dark"] > .app-icon { filter:brightness(0) invert(1); }
+@media (prefers-reduced-motion:reduce) {
+  .glass-surface,.nav-item,.nav-item > .app-icon { transition:none; }
+}
+@media (prefers-reduced-transparency:reduce), (prefers-contrast:more) {
+  [data-glass-backdrop-tone="dark"] > .glass-bar > .glass-surface { background:#f8f9fc; }
+  .nav-item[data-glass-backdrop-tone="dark"] { color:#202126; text-shadow:none; }
+  .nav-item[data-glass-backdrop-tone="dark"] > .app-icon { filter:none; }
+}

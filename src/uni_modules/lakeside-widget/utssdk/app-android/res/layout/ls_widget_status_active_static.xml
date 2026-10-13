@@ -1,0 +1,1 @@
+<ImageView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="16.29dp" android:layout_height="16.29dp" android:layout_gravity="center" android:src="@drawable/ls_widget_light_10" android:importantForAccessibility="no"/>

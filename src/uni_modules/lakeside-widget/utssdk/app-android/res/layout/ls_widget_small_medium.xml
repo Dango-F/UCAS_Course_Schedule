@@ -1,0 +1,40 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/ls_widget_root" android:layout_width="match_parent" android:layout_height="match_parent">
+  <ImageView android:id="@+id/ls_widget_backdrop" android:layout_width="match_parent" android:layout_height="match_parent" android:src="@drawable/ls_widget_background" android:scaleType="fitXY" android:alpha="1" android:importantForAccessibility="no" />
+  <LinearLayout android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical" android:paddingStart="12dp" android:paddingEnd="12dp" android:paddingTop="1dp" android:paddingBottom="1dp" android:clipChildren="false">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="12dp" android:orientation="horizontal" android:gravity="center_vertical">
+      <TextView android:id="@+id/ls_widget_date" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="10/13 周二" android:textColor="#203047" android:textSize="8sp" android:textStyle="bold" android:includeFontPadding="false" android:maxLines="1" />
+      <TextView android:id="@+id/ls_widget_subtitle" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:layout_marginStart="6dp" android:text="第7周" android:textColor="#71869D" android:textSize="8sp" android:includeFontPadding="false" android:maxLines="1" />
+      <TextView android:id="@+id/ls_widget_remaining" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginStart="5dp" android:gravity="center_vertical" android:text="余1堂" android:textColor="#637990" android:textSize="8sp" android:includeFontPadding="false" android:maxLines="1" android:clickable="true" />
+      <TextView android:id="@+id/ls_widget_day" android:layout_width="23dp" android:layout_height="match_parent" android:gravity="center" android:text="明日" android:textSize="8sp" android:includeFontPadding="false" android:textColor="#527DA8" android:contentDescription="查看明日课程" android:clickable="true" />
+      <TextView android:id="@+id/ls_widget_refresh" android:layout_width="wrap_content" android:layout_height="match_parent" android:gravity="center_vertical" android:text="更新于11:07 ↻" android:textSize="8sp" android:includeFontPadding="false" android:textColor="#71869D" android:contentDescription="点击刷新" android:clickable="true" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:minHeight="47dp" android:orientation="vertical" android:gravity="center_vertical" android:clipChildren="false" android:paddingStart="6dp">
+      <LinearLayout android:id="@+id/ls_small_one_top_gap" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" />
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="23dp" android:orientation="horizontal" android:gravity="center_vertical" android:clipChildren="false">
+        <ImageView android:id="@+id/ls_small_accent" android:layout_width="3dp" android:layout_height="match_parent" android:background="#A89BC9" android:importantForAccessibility="no" />
+        <LinearLayout android:id="@+id/ls_small_content" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="7dp" android:clipChildren="false" android:clickable="true">
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:clipChildren="false">
+            <FrameLayout android:id="@+id/ls_small_status" android:layout_width="5dp" android:layout_height="12dp" android:layout_marginEnd="3dp" android:translationY="1dp" android:clipChildren="false" android:clipToPadding="false" />
+            <TextView android:id="@+id/ls_small_label" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginEnd="5dp" android:text="" android:visibility="gone" android:textColor="#527DA8" android:textSize="7.5sp" android:includeFontPadding="false" android:gravity="center_vertical" />
+            <TextView android:id="@+id/ls_small_name" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="打开湖畔课表以同步" android:textColor="#203047" android:textSize="10sp" android:textStyle="bold" android:includeFontPadding="false" android:gravity="center_vertical" />
+          </LinearLayout>
+          <TextView android:id="@+id/ls_small_meta" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:text="点击打开课表" android:textColor="#637990" android:fontFamily="sans-serif" android:textStyle="normal" android:textSize="8sp" android:includeFontPadding="false" />
+        </LinearLayout>
+      </LinearLayout>
+      <LinearLayout android:id="@+id/ls_small_course_gap" android:layout_width="match_parent" android:layout_height="1dp" />
+      <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="23dp" android:orientation="horizontal" android:gravity="center_vertical" android:clipChildren="false" android:id="@+id/ls_small_second">
+        <ImageView android:id="@+id/ls_small_accent_second" android:layout_width="3dp" android:layout_height="match_parent" android:background="#A89BC9" android:importantForAccessibility="no" />
+        <LinearLayout android:id="@+id/ls_small_content_second" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="7dp" android:clipChildren="false" android:clickable="true">
+          <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:clipChildren="false">
+            <FrameLayout android:id="@+id/ls_small_status_second" android:layout_width="5dp" android:layout_height="12dp" android:layout_marginEnd="3dp" android:translationY="1dp" android:clipChildren="false" android:clipToPadding="false" />
+            <TextView android:id="@+id/ls_small_label_second" android:layout_width="wrap_content" android:layout_height="match_parent" android:layout_marginEnd="5dp" android:text="" android:visibility="gone" android:textColor="#527DA8" android:textSize="7.5sp" android:includeFontPadding="false" android:gravity="center_vertical" />
+            <TextView android:id="@+id/ls_small_name_second" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="打开湖畔课表以同步" android:textColor="#203047" android:textSize="10sp" android:textStyle="bold" android:includeFontPadding="false" android:gravity="center_vertical" />
+          </LinearLayout>
+          <TextView android:id="@+id/ls_small_meta_second" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="1dp" android:text="点击打开课表" android:textColor="#637990" android:fontFamily="sans-serif" android:textStyle="normal" android:textSize="8sp" android:includeFontPadding="false" />
+        </LinearLayout>
+      </LinearLayout>
+      <LinearLayout android:id="@+id/ls_small_one_bottom_gap" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="2" />
+    </LinearLayout>
+  </LinearLayout>
+  <TextView android:id="@+id/ls_small_conflict" android:layout_width="wrap_content" android:layout_height="wrap_content" android:visibility="gone" />
+</FrameLayout>

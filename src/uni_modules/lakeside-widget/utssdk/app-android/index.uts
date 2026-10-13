@@ -1,0 +1,12 @@
+import { LakesideWidgetBridge } from 'com.lakeside.widget'
+import { SyncSnapshot, GetWidgetState, UpdateWidgetOptions, RefreshWidgets, RequestPinWidget, ConsumePendingAction } from '../interface.uts'
+export const syncSnapshot: SyncSnapshot = (options) => {
+  LakesideWidgetBridge.syncSnapshot(UTSAndroid.getAppContext()!, options.snapshotJson, (result: string) => { options.complete(result) })
+}
+export const getWidgetState: GetWidgetState = () => LakesideWidgetBridge.getWidgetState(UTSAndroid.getAppContext()!)
+export const updateWidgetOptions: UpdateWidgetOptions = (options) => {
+  LakesideWidgetBridge.updateWidgetOptions(UTSAndroid.getAppContext()!, options.widgetId.toInt(), options.optionsJson, (result: string) => { options.complete(result) })
+}
+export const refreshWidgets: RefreshWidgets = () => { LakesideWidgetBridge.refreshWidgets(UTSAndroid.getAppContext()!) }
+export const requestPinWidget: RequestPinWidget = (kind) => LakesideWidgetBridge.requestPinWidget(UTSAndroid.getAppContext()!, kind)
+export const consumePendingAction: ConsumePendingAction = () => LakesideWidgetBridge.consumePendingAction(UTSAndroid.getAppContext()!)

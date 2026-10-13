@@ -1,0 +1,75 @@
+# Dependencies and package-manager caches
+node_modules/
+.npm-cache/
+.npm/
+.pnpm-store/
+
+# Build output (keep assets referenced by src/manifest.json)
+/dist/
+/unpackage/*
+!/unpackage/res/
+/unpackage/res/*
+!/unpackage/res/icons/
+!/unpackage/res/splash/
+build/
+.gradle/
+.cxx/
+.externalNativeBuild/
+*.tsbuildinfo
+coverage/
+
+# Local backups, diagnostics and temporary browser profiles
+/.backup/
+/.artifacts/
+/.tmp*
+*.log
+*.bak
+*.orig
+*.rej
+*.swp
+*.swo
+*~
+
+# Local environment, credentials and signing configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.local
+.npmrc
+local.properties
+key.properties
+keystore.properties
+signing.properties
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+
+# Installable packages are distributed through releases, not source commits
+*.apk
+*.aab
+*.ipa
+*.apks
+
+# Python helpers
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Machine-specific IDE state; retain shared VS Code tasks/extensions
+/.hbuilderx/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/tasks.json
+*.code-workspace
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

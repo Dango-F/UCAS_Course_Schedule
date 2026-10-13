@@ -1,0 +1,21 @@
+{
+  "pages": [
+    { "path": "pages/index/index", "style": { "navigationStyle": "custom" } },
+    { "path": "pages/loading-lab/index", "style": { "navigationStyle": "custom" } },
+    {
+      "path": "pages/import/index",
+      "style": {
+        "navigationStyle": "custom",
+        "app-plus": {
+          "softinputMode": "adjustResize"
+        }
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "湖畔课表",
+    "navigationBarBackgroundColor": "#F6F8FC",
+    "backgroundColor": "#F6F8FC"
+  }
+}

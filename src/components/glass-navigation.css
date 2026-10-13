@@ -1,0 +1,76 @@
+@import './glass-adaptive.css';
+@import './glass-touch-light.css';
+/* Geometry from LiquidBottomTabs: capsule, 4px inset, independent selector.
+   The WebView port uses live backdrop pixels; all text stays above the lens. */
+/* Match the settings preview: 22px page padding + 1px card border +
+   14px setting padding + 1px stage border + 8px lens inset per side.
+   The settings page uses 16px padding on narrow screens. */
+/* Center on the unscrolled ninth period, using the same anchor on every tab.
+   On short screens keep the full capsule above the safe bottom instead. */
+.liquid-nav { position:absolute; z-index:20; left:46px; right:46px; --navigation-safe-gap:12px; top:clamp(0px,calc(var(--navigation-anchor-center,85%) - 28px),calc(100% - 56px - var(--navigation-safe-gap) - env(safe-area-inset-bottom,0px))); height:56px; pointer-events:none; }
+/* Keep lens nodes and anchor measurements alive while a settings detail is open.
+   Use an attribute: Vue must not overwrite the motion controller's live classes. */
+.liquid-nav[data-navigation-hidden="true"] { visibility:hidden; }
+.liquid-nav[data-navigation-hidden="true"] .glass-bar { pointer-events:none; }
+.liquid-nav[inert] .glass-bar { pointer-events:none; }
+/* Opacity < 1 on the bar creates a Backdrop Root: both lenses then lose the
+   timetable behind it until the fade finishes. Fade the painted surfaces
+   themselves, after their backdrop filtering; keep their ancestors opaque. */
+.liquid-nav .glass-bar { opacity:1; transition:transform 220ms cubic-bezier(.2,.7,.2,1),visibility 0s; }
+.liquid-nav[data-nav-idle="true"] .glass-bar { transform:translateY(9px);pointer-events:none;visibility:hidden;transition-delay:0s,220ms; }
+.liquid-nav .glass-surface { transition:background-color 200ms ease,box-shadow 200ms ease,opacity 180ms ease; }
+.liquid-nav .glass-edge,.liquid-nav .glass-selection > view { transition:opacity 180ms ease; }
+.liquid-nav .nav-item { transition:color 200ms ease,opacity 180ms ease; }
+.liquid-nav[data-nav-idle="true"] .glass-surface,
+.liquid-nav[data-nav-idle="true"] .glass-edge,
+.liquid-nav[data-nav-idle="true"] .glass-selection > view,
+.liquid-nav[data-nav-idle="true"] .nav-item { opacity:0; }
+.glass-wake { position:absolute;left:calc(50% - 32px);top:6px;width:64px;height:44px;margin:0;padding:0;background:transparent;display:flex;align-items:center;justify-content:center;pointer-events:none;visibility:hidden; }
+.glass-wake::after { border:0; }
+.glass-wake > view { width:30px;height:4px;border-radius:3px;background:#66778870;box-shadow:0 1px 1px #ffffffb0; }
+.liquid-nav[data-nav-idle="true"] .glass-wake { visibility:visible;pointer-events:auto; }
+.liquid-nav[data-navigation-hidden="true"] .glass-wake,.liquid-nav[inert] .glass-wake { visibility:hidden;pointer-events:none; }
+.glass-wake:focus-visible { outline:2px solid #527da8;border-radius:22px; }
+@media (max-width:374px) { .liquid-nav { left:40px; right:40px; } }
+/* Motion changes rim optics and shape, never the whole face's exposure. */
+.liquid-nav { --glass-moving-light-alpha:.06; }
+.glass-bar { position:absolute; inset:0; display:flex; padding:4px; border-radius:32px; color:#202126; pointer-events:auto; }
+/* A clear center; thickness comes from the refracted rim, not a white veil. */
+.glass-surface { position:absolute; inset:0; border-radius:inherit; background:rgba(250,250,252,var(--glass-surface-alpha,.06)); -webkit-backdrop-filter:saturate(1.5) blur(var(--glass-blur,.6px)); backdrop-filter:saturate(1.5) blur(var(--glass-blur,.6px)); box-shadow:0 6px 18px #24324a16,0 1px 4px #182c4010,inset 0 1px 1px #ffffffb8,inset 0 -1px 1px #33445b14; pointer-events:none; }
+/* A directional rim, not an equally bright outline. The simple border is
+   retained as the fallback when mask compositing is unavailable. */
+.glass-edge { position:absolute; inset:0; border-radius:inherit; border:1px solid #ffffff65; overflow:hidden; pointer-events:none; }
+@supports ((mask-composite:exclude) or (-webkit-mask-composite:xor)) {
+  .glass-edge { border:0; }
+  .glass-edge::before { content:''; position:absolute; inset:0; border-radius:inherit; padding:1px; background:linear-gradient(145deg,#fffffff2 2%,#ffffff65 28%,#8391a329 48%,#ffffffab 72%,#ffffff40 100%); -webkit-mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0); mask:linear-gradient(#fff 0 0) content-box,linear-gradient(#fff 0 0); -webkit-mask-composite:xor; mask-composite:exclude; }
+}
+.glass-light { position:absolute; left:0; top:0; width:var(--glass-light-width,118px); height:var(--glass-light-height,78px); border-radius:50%; opacity:var(--glass-press,0); background:radial-gradient(ellipse,rgba(255,255,255,var(--glass-moving-light-alpha,.06)),transparent 60%); pointer-events:none; }
+/* View-layer spring owns transforms; CSS must not add a second trailing tween. */
+.glass-selection { position:absolute; top:4px; bottom:4px; left:4px; width:calc((100% - 8px) / var(--glass-tab-count,3)); pointer-events:none; }
+.glass-selection > view { position:relative; width:100%; height:100%; border-radius:24px; background:linear-gradient(155deg,#ffffff1c,transparent 30%); box-shadow:inset 0 1px 1px #ffffffad,inset 0 -1px 1px #30354510,0 1px 3px #24324a08; transform:translateX(var(--glass-flow-impact-x,0%)) scale(var(--glass-stretch,1),var(--glass-squeeze,1)); }
+/* Keep the resting exposure during press/travel/release. Refraction strength
+   can still follow pressure without brightening every backdrop pixel. */
+.glass-selection > view { -webkit-backdrop-filter:brightness(.94) var(--glass-selector-filter,brightness(1)); backdrop-filter:brightness(.94) var(--glass-selector-filter,brightness(1)); }
+/* Clarity remains user-controlled; contact no longer removes/repaints tint. */
+.glass-selection > view::before { content:''; position:absolute; inset:0; border-radius:inherit; background:rgba(227,227,227,var(--glass-selection-alpha,.04)); transition:background-color 200ms ease; pointer-events:none; }
+.glass-selection > view::after { content:''; position:absolute; inset:0; border-radius:inherit; opacity:var(--glass-press,0); box-shadow:inset 0 1px 1px #ffffffde,inset 0 -1px 2px #34405626,0 2px 5px #24324a16; pointer-events:none; }
+.nav-item { position:relative; flex:1; min-width:0; min-height:48px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-size:11px; font-weight:500; border-radius:28px; color:#202126; touch-action:none; -webkit-tap-highlight-color:transparent; }
+.nav-item.active { font-weight:650; }.nav-item:active { opacity:1; }.nav-item:focus-visible { outline:2px solid #527da8; outline-offset:-3px; }
+.glass-selection > view { transform-origin:var(--hop-origin,50% 50%); }
+/* Inflation adds a rim, not an opaque white surface over the live backdrop. */
+.is-hop .glass-selection > view::after { box-shadow:inset 0 1px 1px #ffffffd9,inset 0 -1px 2px #ffffff40,0 5px 16px #29425e1a; }
+/* Q elasticity off: remove transient rim shadows. Resting shadows remain;
+   the pressure-driven reflection/refraction is now shown only while pressed. */
+.is-flow-shadow-disabled .glass-selection > view::after { box-shadow:none; }
+/* The broad travelling glow sits outside the selector. Keep touch optics,
+   but never paint this halo with Q elasticity off. */
+.is-flow-shadow-disabled .glass-light { opacity:0; }
+.is-hop .nav-item > view,.is-hop .nav-item > text { transform:translateY(var(--hop-icon-y,0px)) scale(var(--hop-icon-scale,1)); }
+.is-quiet .glass-bar,.is-quiet .glass-surface,.is-quiet .glass-edge,.is-quiet .nav-item,.is-quiet .glass-selection,.is-quiet .glass-selection > view,.is-quiet .glass-selection > view::before,.is-quiet .glass-light { transition:none; }
+.is-quiet .glass-selection > view { transform:none; }
+.is-quiet .glass-light { display:none; }
+.is-quiet .glass-selection > view::after { opacity:0; }
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))) { .glass-surface { background:rgba(248,249,252,.94); } }
+@media (prefers-reduced-transparency:reduce), (prefers-contrast:more) { .glass-surface { background:#f8f9fc; -webkit-backdrop-filter:none !important; backdrop-filter:none !important; }.glass-selection > view { background:#d8dce3; -webkit-backdrop-filter:none !important; backdrop-filter:none !important; }.glass-selection > view::before { display:none; } }
+@media (prefers-reduced-motion:reduce) { .glass-bar,.glass-selection,.glass-selection > view,.glass-selection > view::before,.glass-light { transition:none; }.glass-selection > view { transform:none !important; }.glass-light { display:none; }.glass-selection > view::after { opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .liquid-nav .glass-bar,.liquid-nav .glass-surface,.liquid-nav .glass-edge,.liquid-nav .nav-item,.liquid-nav .glass-selection > view { transition:none; } }

@@ -1,0 +1,26 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="uts.sdk.modules.lakesideWidget">
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+  <application>
+    <meta-data android:name="com.lakeside.widget.API_VERSION" android:value="2" />
+    <receiver android:name="com.lakeside.widget.LargeWidgetProvider" android:exported="false" android:label="@string/ls_widget_large_name">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/ls_widget_large_info" />
+    </receiver>
+    <receiver android:name="com.lakeside.widget.SmallWidgetProvider" android:exported="false" android:label="@string/ls_widget_small_name">
+      <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
+      <meta-data android:name="android.appwidget.provider" android:resource="@xml/ls_widget_small_info" />
+    </receiver>
+    <receiver android:name="com.lakeside.widget.WidgetPinReceiver" android:exported="false" />
+    <receiver android:name="com.lakeside.widget.WidgetEnvironmentReceiver" android:exported="false">
+      <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+        <action android:name="android.intent.action.TIME_SET" />
+        <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+        <action android:name="android.intent.action.DATE_CHANGED" />
+      </intent-filter>
+    </receiver>
+    <service android:name="com.lakeside.widget.WidgetCollectionService" android:permission="android.permission.BIND_REMOTEVIEWS" android:exported="false" />
+    <activity android:name="com.lakeside.widget.WidgetEntryActivity" android:exported="false" android:excludeFromRecents="true" android:noHistory="true" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:taskAffinity="" />
+  </application>
+</manifest>

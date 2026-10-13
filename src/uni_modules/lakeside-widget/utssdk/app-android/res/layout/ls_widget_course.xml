@@ -1,0 +1,20 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:id="@+id/ls_course_card" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="54dp" android:orientation="horizontal" android:gravity="center_vertical" android:paddingStart="10dp" android:paddingEnd="10dp" android:paddingTop="6dp" android:paddingBottom="6dp" android:background="@drawable/ls_card_blue" android:clickable="false" android:focusable="false" android:clipChildren="false">
+  <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginEnd="10dp" android:clipChildren="false">
+    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+      <TextView android:id="@+id/ls_course_start_section" android:layout_width="20dp" android:layout_height="wrap_content" android:text="1" android:gravity="center" android:textSize="11sp" android:textColor="#526B85" />
+      <TextView android:id="@+id/ls_course_start_time" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="08:30" android:fontFamily="sans-serif" android:textStyle="normal" android:textSize="11sp" android:textColor="#526B85" />
+    </LinearLayout>
+    <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:layout_marginTop="5dp">
+      <TextView android:id="@+id/ls_course_end_section" android:layout_width="20dp" android:layout_height="wrap_content" android:text="3" android:gravity="center" android:textSize="11sp" android:textColor="#637990" />
+      <TextView android:id="@+id/ls_course_end_time" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="11:10" android:fontFamily="sans-serif" android:textStyle="normal" android:textSize="11sp" android:textColor="#637990" />
+    </LinearLayout>
+  </LinearLayout>
+  <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:clipChildren="false">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:clipChildren="false">
+      <FrameLayout android:id="@+id/ls_course_status" android:translationY="1dp" android:layout_width="6dp" android:layout_height="19dp" android:layout_marginEnd="3dp" android:clipChildren="false" android:clipToPadding="false" />
+      <TextView android:id="@+id/ls_course_name" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="课程名称" android:textColor="#203047" android:textSize="13sp" android:textStyle="bold" android:maxLines="2" android:ellipsize="end" />
+    </LinearLayout>
+    <TextView android:id="@+id/ls_course_meta" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="3dp" android:textColor="#526B85" android:fontFamily="sans-serif" android:textStyle="normal" android:textSize="11sp" android:maxLines="1" android:ellipsize="end" />
+    <TextView android:id="@+id/ls_course_badge" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="2dp" android:textColor="#637990" android:textSize="10sp" android:maxLines="1" android:ellipsize="end" android:visibility="gone" />
+  </LinearLayout>
+</LinearLayout>

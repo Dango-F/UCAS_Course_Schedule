@@ -1,0 +1,11 @@
+$status-light-green: #43a878;
+$status-light-yellow: #d5aa48;
+$status-light-gray: #eceef0;
+$status-light-size: 7;
+$status-light-halo: 6;
+$status-light-period: 2400;
+
+.status-light { width:#{$status-light-size}px; height:#{$status-light-size}px; border-radius:50%; flex-shrink:0; background:$status-light-green; opacity:.9; box-shadow:0 0 0 0 rgba($status-light-green,.28); animation:status-breathe var(--status-motion-duration,#{$status-light-period}ms) ease-in-out infinite; }
+.status-light.is-pending { background:$status-light-yellow; opacity:1; box-shadow:none; animation:none; }
+.status-light.is-ended { background:$status-light-gray; opacity:1; box-shadow:0 0 0 .6px #b5bcc5; animation:none; }
+@keyframes status-breathe { 0%,100% { transform:scale(.88); opacity:.8; box-shadow:0 0 0 0 rgba($status-light-green,.3); } 50% { transform:scale(1); opacity:1; box-shadow:0 0 0 var(--status-light-halo,#{$status-light-halo}px) rgba($status-light-green,0); } }

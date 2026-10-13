@@ -1,0 +1,1 @@
+<TextView xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="54dp" android:gravity="center" android:text="正在读取本地课表…" android:textColor="#71869D" android:textSize="12sp" />

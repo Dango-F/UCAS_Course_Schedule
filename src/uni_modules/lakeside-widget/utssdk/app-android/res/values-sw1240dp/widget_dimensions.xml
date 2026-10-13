@@ -1,0 +1,4 @@
+<resources>
+  <!-- Prefer a full row without depending on a launcher's column count. -->
+  <dimen name="ls_widget_default_width">1176dp</dimen>
+</resources>

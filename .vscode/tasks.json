@@ -1,0 +1,19 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "湖畔课表：启动网页预览",
+      "type": "npm",
+      "script": "dev:h5",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "uni-preview",
+        "pattern": { "regexp": "^(.*)\\((\\d+),(\\d+)\\): (.*)$", "file": 1, "line": 2, "column": 3, "message": 4 },
+        "background": { "activeOnStart": true, "beginsPattern": "Compiling", "endsPattern": "ready in" }
+      },
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    { "label": "湖畔课表：类型检查", "type": "npm", "script": "typecheck", "problemMatcher": "$tsc" },
+    { "label": "湖畔课表：构建安卓应用资源", "type": "npm", "script": "build:app", "problemMatcher": [], "group": "build" }
+  ]
+}

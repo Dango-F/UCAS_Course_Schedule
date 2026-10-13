@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" viewBox="0 0 200 100">
+  <!-- Periodic curves meet with matching tangents at x=0/200. A static
+       vector texture: no animated filter, blur, or per-frame rasterization. -->
+  <defs>
+    <path id="a" d="M-200 13 C-175 13 -175 33 -150 33 S-125 3 -100 3 S-75 25 -50 25 S-25 13 0 13 S25 33 50 33 S75 3 100 3 S125 25 150 25 S175 13 200 13 S225 33 250 33"/>
+    <path id="b" d="M-200 48 C-175 48 -175 35 -150 35 S-125 65 -100 65 S-75 40 -50 40 S-25 48 0 48 S25 35 50 35 S75 65 100 65 S125 40 150 40 S175 48 200 48 S225 35 250 35"/>
+    <path id="c" d="M-200 83 C-175 83 -175 67 -150 67 S-125 88 -100 88 S-75 72 -50 72 S-25 83 0 83 S25 67 50 67 S75 88 100 88 S125 72 150 72 S175 83 200 83 S225 67 250 67"/>
+  </defs>
+  <g fill="none" stroke-linecap="round">
+    <g stroke="#081018" transform="translate(0 4)">
+      <g stroke-width="17" opacity=".07"><use href="#a"/><use href="#b"/><use href="#c"/></g>
+      <g stroke-width="9" opacity=".19"><use href="#a"/><use href="#b"/><use href="#c"/></g>
+      <g stroke-width="3" opacity=".22"><use href="#a"/><use href="#b"/><use href="#c"/></g>
+    </g>
+    <g stroke="#fff">
+      <g stroke-width="15" opacity=".07"><use href="#a"/><use href="#b"/><use href="#c"/></g>
+      <g stroke-width="7" opacity=".20"><use href="#a"/><use href="#b"/><use href="#c"/></g>
+      <g stroke-width="2.5" opacity=".68"><use href="#a"/><use href="#b"/><use href="#c"/></g>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+/* Settings detail and embedded import share the shadow-free slide transition. */
+.slide-detail { transform:translate3d(100%,0,0); transition:transform var(--settings-route-duration) cubic-bezier(.22,.68,.36,1); }
+.slide-detail.detail-shown { transform:translate3d(0,0,0); }
+.slide-detail.route-moving { will-change:transform; }
+.slide-detail.route-leaving { pointer-events:none; }
+.settings-detail.route-leaving,.import-route.route-leaving { transition-duration:var(--settings-route-exit-duration,var(--settings-route-duration)); }
+.reduced-motion .slide-detail { transition:none !important; }
+@media (prefers-reduced-motion:reduce) { .slide-detail { transition-duration:.001ms !important; } }

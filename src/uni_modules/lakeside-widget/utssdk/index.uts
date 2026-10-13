@@ -1,0 +1,7 @@
+import { SyncSnapshot, GetWidgetState, UpdateWidgetOptions, RefreshWidgets, RequestPinWidget, ConsumePendingAction } from './interface.uts'
+export const syncSnapshot: SyncSnapshot = (options) => { options.complete('{"ok":false,"revision":"","error":"unsupported"}') }
+export const getWidgetState: GetWidgetState = () => '{"supported":false,"pinSupported":false,"revision":"","cacheState":"unsupported","instances":[]}'
+export const updateWidgetOptions: UpdateWidgetOptions = (options) => { options.complete('{"ok":false}') }
+export const refreshWidgets: RefreshWidgets = () => {}
+export const requestPinWidget: RequestPinWidget = (_kind) => '{"status":"unavailable","reason":"unsupported"}'
+export const consumePendingAction: ConsumePendingAction = () => null

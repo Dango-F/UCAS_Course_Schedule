@@ -1,0 +1,9 @@
+{
+  "id": "lakeside-widget",
+  "displayName": "湖畔课表桌面小组件",
+  "version": "1.0.0",
+  "description": "离线今日课表和当前课程 Android 桌面组件",
+  "engines": { "HBuilderX": "^5.24.0" },
+  "dcloudext": { "type": "uts" },
+  "uni_modules": { "dependencies": [], "encrypt": [] }
+}

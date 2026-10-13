@@ -1,0 +1,13 @@
+/* The transparent local surface field reveals the existing background lens.
+   No repeated texture, sharp strokes, or full-face white fill. */
+.glass-touch-light {
+  position:absolute; inset:0; border-radius:inherit; overflow:hidden;
+  pointer-events:none; opacity:0;
+}
+.glass-touch-sheen {
+  position:absolute; inset:0; pointer-events:none;
+}
+.is-quiet .glass-touch-light,[data-glass-touch-light="off"] .glass-touch-light { display:none; }
+@media (prefers-reduced-motion:reduce),(prefers-reduced-transparency:reduce),(prefers-contrast:more) {
+  .glass-touch-light { display:none; }
+}

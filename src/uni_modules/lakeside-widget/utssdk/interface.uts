@@ -1,0 +1,8 @@
+export type SyncOptions = { snapshotJson: string; complete: (resultJson: string) => void }
+export type UpdateOptions = { widgetId: number; optionsJson: string; complete: (resultJson: string) => void }
+export type SyncSnapshot = (options: SyncOptions) => void
+export type GetWidgetState = () => string
+export type UpdateWidgetOptions = (options: UpdateOptions) => void
+export type RefreshWidgets = () => void
+export type RequestPinWidget = (kind: string) => string
+export type ConsumePendingAction = () => string | null

@@ -1,0 +1,45 @@
+{
+  "name": "lakeside-schedule",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "uni --host 127.0.0.1 --port 8080",
+    "dev:h5": "uni --host 127.0.0.1 --port 5173",
+    "dev:app": "uni -p app",
+    "dev:app-plus": "uni -p app",
+    "build:h5": "uni build -p h5",
+    "prebuild:app": "node scripts/generate-widget-status.cjs",
+    "build:app": "uni build -p app",
+    "build:app-plus": "uni build -p app",
+    "typecheck": "vue-tsc --noEmit",
+    "prepare:widget-hbuilderx": "node scripts/prepare-widget-hbuilderx.cjs",
+    "verify:widget-ui": "node scripts/verify-settings-categories.cjs --widgets-only",
+    "verify:launch-ui": "node scripts/verify-launch-screen.cjs",
+    "verify:widget-native": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-widget-native.ps1",
+    "setup:widget-android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-widget-android-environment.ps1",
+    "verify:widget-gradle": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-widget-gradle.ps1",
+    "prepare:widget-android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-widget-android.ps1",
+    "prepare:android-release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-widget-android.ps1",
+    "verify:widget-apk": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify-widget-apk.ps1",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "3.0.0-5020620260917001",
+    "@dcloudio/uni-app-plus": "3.0.0-5020620260917001",
+    "@dcloudio/uni-components": "3.0.0-5020620260917001",
+    "@dcloudio/uni-h5": "3.0.0-5020620260917001",
+    "pinia": "2.1.7",
+    "vue": "3.4.21"
+  },
+  "devDependencies": {
+    "@dcloudio/types": "3.4.31",
+    "@dcloudio/uni-uts-v1": "3.0.0-5020620260917001",
+    "@dcloudio/vite-plugin-uni": "3.0.0-5020620260917001",
+    "@vue/tsconfig": "0.5.1",
+    "sass": "1.77.8",
+    "typescript": "5.4.5",
+    "vite": "5.2.8",
+    "vitest": "1.6.1",
+    "vue-tsc": "2.2.12"
+  }
+}

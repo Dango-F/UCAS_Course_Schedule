@@ -1,0 +1,13 @@
+const fs = require('node:fs');
+const path = require('node:path');
+const esbuild = require('esbuild');
+const result = esbuild.buildSync({ stdin: { contents: "export { buildWidgetSnapshot } from './src/domain/widget'; export { makeDemo } from './src/data/demo'", resolveDir: process.cwd() }, bundle: true, platform: 'node', format: 'cjs', write: false });
+const fixtureModule = { exports: {} };
+new Function('module', 'exports', result.outputFiles[0].text)(fixtureModule, fixtureModule.exports);
+const { buildWidgetSnapshot, makeDemo } = fixtureModule.exports;
+const schedule = makeDemo('normal');
+schedule.semester.confirmed = true;
+const output = path.resolve('.artifacts/widget-native');
+fs.mkdirSync(output, { recursive: true });
+fs.writeFileSync(path.join(output, 'snapshot.json'), JSON.stringify(buildWidgetSnapshot(schedule, 1)));
+console.log('Exported the real TypeScript semester snapshot for Kotlin contract tests.');
