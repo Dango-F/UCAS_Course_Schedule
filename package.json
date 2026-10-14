@@ -8,7 +8,7 @@
     "dev:app": "uni -p app",
     "dev:app-plus": "uni -p app",
     "build:h5": "uni build -p h5",
-    "prebuild:app": "node scripts/generate-widget-status.cjs",
+    "prebuild:app": "node scripts/generate-widget-assets.cjs",
     "build:app": "uni build -p app",
     "build:app-plus": "uni build -p app",
     "typecheck": "vue-tsc --noEmit",

@@ -113,6 +113,103 @@ fun main(args: Array<String>) {
         check(WidgetSelector.smallCourses(data, selection, now, 4) == rows.take(4))
         check(WidgetSelector.smallCourses(data, selection, now, 2) == rows.take(2))
     }
+    test("Tall compact widget keeps current priority and continues beyond four courses") {
+        val first = snapshot.courses.first()
+        val now = first.start
+        val ended = first.copy(id = "ended", start = now - 60000L, end = now)
+        val rows = (0..11).map { first.copy(id = "tall-$it", start = now + it * 60000L, end = first.end + it * 60000L) }
+        val data = snapshot.copy(courses = listOf(ended) + rows.take(2) + rows.drop(1))
+        val selected = WidgetSelector.select(data, "valid", now)
+        check(WidgetSelector.smallCourses(data, selected, now, 7) == rows.take(7))
+        check(WidgetSelector.smallCourses(data, selected, now, 99) == rows)
+        check(WidgetSelector.smallCourses(data, selected, now, 2) == rows.take(2))
+    }
+    test("Tall tomorrow preview uses all available tomorrow courses and never a later day") {
+        val first = snapshot.courses.first()
+        val now = WidgetClock.midnight(first.date) - 3600000L
+        val tomorrow = (0..6).map { first.copy(id = "tomorrow-extra-$it", start = first.start + it * 60000L, end = first.end + it * 60000L) }
+        val later = first.copy(id = "later-day", date = WidgetClock.date(WidgetClock.midnight(first.date) + 86400000L), start = first.start + 86400000L, end = first.end + 86400000L)
+        val data = snapshot.copy(courses = tomorrow + later)
+        check(WidgetSelector.smallCourses(data, WidgetSelector.select(data, "valid", now, 1), now, 12) == tomorrow)
+    }
+    test("Compact height boundaries grow capacity and shrink back to two or four") {
+        fun count(height: Float) = SmallWidgetSizing.candidateLimit(height, 180f)
+        check(count(84f) == 2 && count(139f) == 2)
+        check(count(140f) == 4 && count(180f) == 4 && count(218f) == 4)
+        check(count(269.9f) == 4 && count(270f) == 6 && count(320f) == 6)
+        check(count(359.9f) == 6 && count(360f) == 8 && count(480f) == 10)
+        check(count(218.6f) == 4)
+        check(count(140f) == 4 && count(84f) == 2)
+        check(count(Float.NaN) == 2 && count(100000f) == 64)
+    }
+    test("One-row update pre-sends the two-row and taller layouts before resize callbacks") {
+        val heights = SmallWidgetSizing.responsiveHeights(180f, 800f)
+        check(heights.containsAll(listOf(48f, 62f, 78f, 140f, 180f, 270f, 360f)))
+        fun displayed(height: Float): Int = SmallWidgetSizing.candidateLimit(heights.last { it <= height }, 180f)
+        check(displayed(84f) == 2)
+        check(displayed(180f) == 4)
+        check(displayed(84f) == 2) // shrink without generating another plan
+        check(displayed(320f) == 6 && displayed(360f) == 8)
+        check(heights == heights.sorted().distinct() && heights.size <= 16)
+    }
+    test("Responsive plan handles missing sizes and stays within Android's 16-frame limit") {
+        val fallback = SmallWidgetSizing.responsiveHeights(Float.NaN, Float.NaN)
+        check(fallback.containsAll(listOf(48f, 140f, 180f, 270f, 360f)))
+        val huge = SmallWidgetSizing.responsiveHeights(180f, 3000f)
+        check(huge.size == 16 && huge == huge.sorted().distinct())
+        check(SmallWidgetSizing.candidateLimit(huge.last(), 180f) == 64)
+        check(huge.contains(140f) && huge.contains(180f))
+    }
+    test("Repeated resize requests drop outdated work but keep the newest widget frame") {
+        val older = WidgetResizeRequests.begin(201)
+        val newer = WidgetResizeRequests.begin(201)
+        check(!WidgetResizeRequests.isLatest(201, older))
+        check(WidgetResizeRequests.isLatest(201, newer))
+        WidgetResizeRequests.finish(201, older)
+        check(WidgetResizeRequests.isLatest(201, newer))
+        WidgetResizeRequests.finish(201, newer)
+        check(!WidgetResizeRequests.isLatest(201, newer))
+    }
+    test("Resize coalescing isolates widget instances and cancellation prevents stale submissions") {
+        val first = WidgetResizeRequests.begin(202)
+        val other = WidgetResizeRequests.begin(203)
+        WidgetResizeRequests.begin(202)
+        check(!WidgetResizeRequests.isLatest(202, first))
+        check(WidgetResizeRequests.isLatest(203, other))
+        WidgetResizeRequests.cancel(203)
+        check(!WidgetResizeRequests.isLatest(203, other))
+        WidgetResizeRequests.cancel(202)
+    }
+    test("Compact fit count includes fixed gaps and never adds a partially fitting row") {
+        val rows = List(12) { 31.545f }
+        check(SmallWidgetSizing.fitCount(180f, rows, 32.818f, 7f, 0f) == 4)
+        check(SmallWidgetSizing.fitCount(218f, rows, 32.818f, 7f, 0f) == 4)
+        check(SmallWidgetSizing.fitCount(219f, rows, 32.818f, 7f, 0f) == 5)
+        check(SmallWidgetSizing.fitCount(320f, rows, 32.818f, 7f, 0f) == 7)
+    }
+    test("Two-row compact keeps four base courses when wrapped titles exceed fixed spacing") {
+        val rows = listOf(46f, 46f, 36f, 36f)
+        val fitted = SmallWidgetSizing.fitCount(180f, rows, 32.818f, 7f, 0f)
+        check(fitted == 3)
+        check(SmallWidgetSizing.visibleCount(180f, rows.size, fitted) == 4)
+        check(SmallWidgetSizing.visibleCount(200f, 5, 3) == 4)
+        check(SmallWidgetSizing.visibleCount(140f, 4, 3) == 4)
+        check(SmallWidgetSizing.visibleCount(84f, 2, 1) == 2)
+    }
+    test("Base capacity never invents courses or adds unfitting extra rows") {
+        check(SmallWidgetSizing.visibleCount(180f, 3, 3) == 3)
+        check(SmallWidgetSizing.visibleCount(180f, 0, 0) == 0)
+        check(SmallWidgetSizing.visibleCount(320f, 7, 6) == 6)
+        check(SmallWidgetSizing.visibleCount(320f, 8, 7) == 6)
+        check(SmallWidgetSizing.visibleCount(360f, 8, 8) == 8)
+        check(SmallWidgetSizing.visibleCount(360f, 7, 8) == 7)
+    }
+    test("Long names and larger fonts reduce extra rows instead of cropping later courses") {
+        val wrapped = listOf(80f) + List(11) { 31.545f }
+        check(SmallWidgetSizing.fitCount(320f, wrapped, 32.818f, 7f, 0f) == 6)
+        check(SmallWidgetSizing.fitCount(320f, List(12) { 54f }, 32.818f, 7f, 0f) == 4)
+        check(SmallWidgetSizing.fitCount(320f, emptyList(), 32.818f, 7f) == 0)
+    }
     test("Two-course tomorrow preview stays within tomorrow and handles one or no courses") {
         val now = at("2026-09-13", "21:00")
         val selection = WidgetSelector.select(snapshot, "valid", now, 1)

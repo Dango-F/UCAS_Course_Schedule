@@ -1,5 +1,5 @@
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="@dimen/ls_widget_default_width" android:minHeight="48dp" android:minResizeHeight="48dp" android:maxResizeHeight="140dp"
+    android:minWidth="@dimen/ls_widget_default_width" android:minHeight="48dp" android:minResizeHeight="48dp"
     android:targetCellHeight="1" android:resizeMode="vertical"
     android:initialLayout="@layout/ls_widget_small_dense" android:previewLayout="@layout/ls_widget_small_compact"
     android:previewImage="@drawable/ls_widget_preview_small" android:description="@string/ls_widget_small_description"

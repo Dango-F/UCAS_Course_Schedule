@@ -1,10 +1,10 @@
 <template>
   <view class="widget-settings" :class="{ quiet: store.reducedMotion }">
     <view class="widget-showcase">
-      <view class="style-copy"><text class="style-title">今日课表 · 详细版</text><text>当天全部课程，可滚动查看。</text></view>
-      <button class="add-widget" :disabled="busy" @click="add('large')">添加详细版<AppIcon name="plus" :size="17" color="#fff" /></button>
+      <view class="style-copy"><text class="style-title">今日课表 · 宽松版</text><text>当天全部课程，可滚动查看。</text></view>
+      <button class="add-widget" :disabled="busy" @click="add('large')">添加宽松版<AppIcon name="plus" :size="17" color="#fff" /></button>
       <text v-if="requested?.kind === 'large'" class="pin-hint">请在系统窗口确认添加；若没有弹出窗口，可点击标题旁的提示图标。</text>
-      <view class="widget-preview detailed-preview" aria-label="详细版课表样式示意">
+      <view class="widget-preview detailed-preview" aria-label="宽松版课表样式示意">
         <view class="detailed-header"><text>2026/10/12</text><text>明日 · 更新于08:00 ↻</text></view>
         <text class="detailed-subtitle">研一秋 · 第6周 · 周一</text>
         <view v-for="(course, index) in detailedPreviewCourses" :key="course.name" class="detailed-course" :class="{ ended: index === 0 }" :style="{ background: course.background }">
@@ -16,10 +16,10 @@
         </view>
         <text class="detailed-footer">今日还有2堂课 ›</text>
       </view>
-      <view class="style-copy compact-style-copy"><text class="style-title">当前课程 · 简洁版</text><text>一行显示最多两堂课，拉高至两行显示最多四堂。</text></view>
-      <button class="add-widget" :disabled="busy" @click="add('small')">添加简洁版<AppIcon name="plus" :size="17" color="#fff" /></button>
+      <view class="style-copy compact-style-copy"><text class="style-title">当前课程 · 紧凑版</text><text>一行最多两堂，两行最多四堂；每增加一行，多显示两堂。</text></view>
+      <button class="add-widget" :disabled="busy" @click="add('small')">添加紧凑版<AppIcon name="plus" :size="17" color="#fff" /></button>
       <text v-if="requested?.kind === 'small'" class="pin-hint">请在系统窗口确认添加；若没有弹出窗口，可点击标题旁的提示图标。</text>
-      <view v-for="size in previewSizes" :key="size.rows" class="widget-preview compact single-line" :class="{ 'four-line': size.rows === 2 }" :aria-label="size.rows === 1 ? '简洁版一行两堂课程样式示意' : '简洁版两行四堂课程样式示意'">
+      <view v-for="size in previewSizes" :key="size.rows" class="widget-preview compact single-line" :class="{ 'four-line': size.rows === 2 }" :aria-label="size.rows === 1 ? '紧凑版一行两堂课程样式示意' : '紧凑版两行四堂课程样式示意'">
         <view class="single-topline">
           <view class="single-calendar"><text>10/12 周一</text><text>第6周</text></view>
           <view class="single-actions"><text class="single-remaining">余3堂</text><text class="single-day">明日</text><text class="single-refresh">更新于08:00 ↻</text></view>
@@ -44,7 +44,7 @@
     <view v-if="state.supported" class="instance-section">
       <view class="instance-heading"><text class="style-title">桌面上的组件</text><button class="instance-refresh" :disabled="busy" aria-label="刷新组件列表" @click="reload"><AppIcon name="refresh" :size="20" color="#527da8" /></button></view>
       <text v-if="!state.instances.length" class="empty-instances">还没有添加小组件。</text>
-      <view v-else class="instance-tabs"><button v-for="item in state.instances" :key="item.id" :class="{ selected: selectedId === item.id }" :aria-pressed="selectedId === item.id" @click="selectedId = item.id">{{ item.kind === 'large' ? '详细版' : '简洁版' }} · {{ item.id }}</button></view>
+      <view v-else class="instance-tabs"><button v-for="item in state.instances" :key="item.id" :class="{ selected: selectedId === item.id }" :aria-pressed="selectedId === item.id" @click="selectedId = item.id">{{ item.kind === 'large' ? '宽松版' : '紧凑版' }} · {{ item.id }}</button></view>
       <view v-if="selected" class="instance-options">
         <button v-for="option in displayOptions" :key="option.key" class="option-row" role="switch" :aria-label="option.label" :aria-checked="selected.options[option.key]" :disabled="busy" @click="toggle(option.key)">
           <text>{{ option.label }}</text><view class="widget-switch" :class="{ on: selected.options[option.key] }"><view /></view>
@@ -99,7 +99,7 @@ function reload(): void {
   if (requested.value && state.value.instances.some(item => item.kind === requested.value!.kind && !requested.value!.previousIds.includes(item.id))) {
     const kind = requested.value.kind
     requested.value = null
-    emit('notice', { title: '已添加到桌面', message: `${kind === 'large' ? '今日课表' : '当前课程'}小组件已就位。回到桌面即可查看。`, tone: 'success' })
+    emit('notice', { title: '已添加到桌面', message: `${kind === 'large' ? '宽松版' : '紧凑版'}小组件已就位。回到桌面即可查看。`, tone: 'success' })
   }
 }
 function add(kind: WidgetKind): void {
@@ -176,7 +176,7 @@ defineExpose({ resync, syncBusy })
 .compact { border-left:5px solid #a89bc9; gap:5px; margin-top:13px; padding-top:10px; padding-bottom:10px; }
 .meta-hanzi { font-size:94%; }
 .single-line { border-left:0; flex-direction:column; gap:0; padding:2px 12px; margin-top:0; min-height:84px; }
-.four-line { min-height:140px; padding-top:6px; padding-bottom:4px; }.four-line .single-course-list { min-height:114px; gap:0; }.four-line .single-course { min-height:27px; flex:1 0 auto; gap:0; }.four-line .single-course-gap { height:2px; min-height:2px; flex:1.1 0 2px; }.four-line .single-line-gap { height:1px; min-height:1px; flex:1 0 1px; }.four-line .single-edge-gap { height:0; flex:0.75 0 0; }
+.four-line { min-height:140px; padding-top:6px; padding-bottom:4px; }.four-line .single-course-list { min-height:114px; max-height:154px; gap:0; }.four-line .single-course { min-height:27px; flex:1 0 auto; gap:0; }.four-line .single-course-gap { height:2px; min-height:2px; flex:1.1 0 2px; }.four-line .single-line-gap { height:1px; min-height:1px; flex:1 0 1px; }.four-line .single-edge-gap { height:0; flex:0.75 0 0; }
 .single-topline { display:flex; align-items:center; min-height:16px; gap:5px; }
 .single-calendar { display:flex; flex:1; min-width:0; align-items:center; gap:6px; font-size:9px; color:#71869d; white-space:nowrap; }
 .single-calendar > text:first-child { font-size:10px; font-weight:600; color:#203047; }

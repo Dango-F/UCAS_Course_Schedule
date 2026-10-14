@@ -111,6 +111,59 @@ internal object WidgetDayView {
     fun offset(baseDate: String?, value: Int, now: Long): Int = if (baseDate == WidgetClock.date(now) && value == 1) 1 else 0
     fun date(now: Long, offset: Int): String = WidgetClock.date(WidgetClock.midnight(WidgetClock.date(now)) + if (offset == 1) 86400000L else 0L)
 }
+internal object SmallWidgetSizing {
+    // Pre-send a range of heights so the host can switch views during dragging,
+    // even when it only notifies the provider after the user releases the handle.
+    fun responsiveHeights(twoRowHeight: Float, maximumHeight: Float): List<Float> {
+        val cap = if (twoRowHeight.isFinite() && twoRowHeight >= 140f) twoRowHeight else 180f
+        val step = cap / 2f
+        val maximum = if (maximumHeight.isFinite()) maxOf(maximumHeight, cap * 2f) else cap * 2f
+        val heights = mutableListOf(48f, 62f, 78f, 140f, cap).distinct().toMutableList()
+        var next = cap + step
+        while (heights.size < 16 && next <= maximum + step) {
+            heights.add(next)
+            next += step
+        }
+        // Very large hosts still receive a frame for their current capacity.
+        val current = cap + floor(((maximum - cap) / step).toDouble()).toFloat().coerceIn(0f, 30f) * step
+        if (current > heights.last()) heights[heights.lastIndex] = current
+        return heights
+    }
+    // Two/four are the compact widget's base capacities. Measurement limits
+    // additional rows; it must not remove a base slot just to preserve spacing.
+    fun visibleCount(height: Float, available: Int, fitting: Int): Int {
+        val base = if (!height.isFinite() || height < 140f) 2 else 4
+        // Extra height adds pairs of courses, never a lone fifth/seventh slot.
+        val paired = fitting.coerceAtLeast(0) / 2 * 2
+        return maxOf(base, paired).coerceAtMost(available.coerceAtLeast(0))
+    }
+    fun candidateLimit(height: Float, twoRowHeight: Float): Int {
+        if (!height.isFinite() || height < 140f) return 2
+        if (!twoRowHeight.isFinite() || twoRowHeight <= 0f || height <= twoRowHeight) return 4
+        val extraRows = kotlin.math.floor((height - twoRowHeight) / (twoRowHeight / 2f)).toInt().coerceIn(0, 30)
+        return 4 + extraRows * 2
+    }
+    fun fitCount(height: Float, rowHeights: List<Float>, chrome: Float, gap: Float, tolerance: Float = 1f): Int {
+        if (!height.isFinite() || !chrome.isFinite() || !gap.isFinite()) return 0
+        var used = chrome
+        var count = 0
+        for (row in rowHeights) {
+            if (!row.isFinite() || row <= 0f) break
+            val next = used + row + if (count == 0) 0f else gap
+            if (next > height + tolerance) break
+            used = next; count++
+        }
+        return count
+    }
+}
+internal object WidgetResizeRequests {
+    private var sequence = 0L
+    private val latest = mutableMapOf<Int, Long>()
+    @Synchronized fun begin(id: Int): Long = (++sequence).also { latest[id] = it }
+    @Synchronized fun isLatest(id: Int, token: Long): Boolean = latest[id] == token
+    @Synchronized fun finish(id: Int, token: Long) { if (latest[id] == token) latest.remove(id) }
+    @Synchronized fun cancel(id: Int) { latest.remove(id) }
+}
 internal object WidgetSelector {
     // Reuse the same semester ordering and stages for two/four-course widgets.
     // A tomorrow preview stays within tomorrow; normal mode can look ahead.
@@ -118,7 +171,7 @@ internal object WidgetSelector {
         if (snapshot == null || selection.stage !in listOf("active", "before")) return emptyList()
         val candidates = if (selection.date != WidgetClock.date(now)) selection.today
             else selection.current + snapshot.courses.filter { it.start > now }
-        return candidates.distinctBy { it.id }.take(limit.coerceIn(1, 4))
+        return candidates.distinctBy { it.id }.take(limit.coerceAtLeast(1))
     }
     fun select(snapshot: WidgetSnapshot?, cacheState: String, now: Long, dayOffset: Int = 0): WidgetSelection {
         val date = WidgetDayView.date(now, dayOffset)

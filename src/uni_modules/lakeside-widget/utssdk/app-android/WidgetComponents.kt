@@ -42,14 +42,16 @@ internal object WidgetUpdates {
         } catch (_: Exception) { Log.w("LakesideWidget", "Periodic refresh could not be scheduled") }
     }
     // A periodic worker and a day-preview tap may run concurrently. Submit whole frames in order.
-    fun refreshOne(context: Context, id: Int, kind: String, now: Long = System.currentTimeMillis()): Unit = synchronized(RENDER_LOCK) {
+    fun refreshOne(context: Context, id: Int, kind: String, now: Long = System.currentTimeMillis(), sizeOptions: Bundle? = null, shouldSubmit: () -> Boolean = { true }): Unit = synchronized(RENDER_LOCK) {
+        if (!shouldSubmit()) return@synchronized
         val repo = WidgetRepository(context)
         val (snapshot, state) = repo.read()
         val renderer = WidgetRenderer(context)
         val selection = WidgetSelector.select(snapshot, state, now, repo.dayOffset(id, now))
         val options = repo.options(id, kind)
         if (kind == "large" && android.os.Build.VERSION.SDK_INT < 31) repo.saveFrame(id, snapshot, selection.today, options, now)
-        val view = renderer.render(id, kind, snapshot, selection, options, now)
+        val view = renderer.render(id, kind, snapshot, selection, options, now, sizeOptions)
+        if (!shouldSubmit()) return@synchronized
         AppWidgetManager.getInstance(context).updateAppWidget(id, view)
         if (kind == "large" && android.os.Build.VERSION.SDK_INT < 31) {
             @Suppress("DEPRECATION")
@@ -77,9 +79,24 @@ abstract class LakesideWidgetProvider : AppWidgetProvider() {
         LakesideWidgetBridge.executor.execute { try { WidgetUpdates.refreshAll(context.applicationContext) } finally { pending.finish() } }
     }
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { update(context) }
-    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) { update(context) }
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) {
+        val token = WidgetResizeRequests.begin(id)
+        val sizes = Bundle(options)
+        val pending = goAsync()
+        Log.d("LakesideWidget", "Resize received id=$id minHeight=${sizes.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT)} maxHeight=${sizes.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)}")
+        LakesideWidgetBridge.executor.execute {
+            try {
+                val appContext = context.applicationContext
+                if (WidgetResizeRequests.isLatest(id, token) && WidgetRepository(appContext).instances().contains(id to kind)) {
+                    WidgetUpdates.refreshOne(appContext, id, kind, sizeOptions = sizes,
+                        shouldSubmit = { WidgetResizeRequests.isLatest(id, token) })
+                }
+            } catch (_: Exception) { Log.w("LakesideWidget", "Resize could not be rendered id=$id") }
+            finally { WidgetResizeRequests.finish(id, token); pending.finish() }
+        }
+    }
     override fun onEnabled(context: Context) { WidgetUpdates.schedule(context) }
-    override fun onDeleted(context: Context, ids: IntArray) { ids.forEach { WidgetRepository(context).remove(it) }; WidgetUpdates.schedule(context) }
+    override fun onDeleted(context: Context, ids: IntArray) { ids.forEach { WidgetResizeRequests.cancel(it); WidgetRepository(context).remove(it) }; WidgetUpdates.schedule(context) }
     override fun onDisabled(context: Context) { WidgetUpdates.schedule(context) }
     // AppWidgetProvider.onReceive follows onRestored with onUpdate; call goAsync only once.
     override fun onRestored(context: Context, oldIds: IntArray, newIds: IntArray) { WidgetRepository(context).restore(oldIds, newIds) }

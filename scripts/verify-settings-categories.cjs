@@ -124,7 +124,7 @@ async function main() {
         await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});
         await open('widgets');
         assert.equal(await evaluate("document.querySelectorAll('.widget-preview').length"),3);
-        assert.equal(await evaluate("document.querySelector('[aria-label=\"详细版课表样式示意\"]')!==null"),true,'large sample card is restored');
+        assert.equal(await evaluate("document.querySelector('[aria-label=\"宽松版课表样式示意\"]')!==null"),true,'large sample card is restored');
         assert.equal(await evaluate("document.querySelectorAll('.add-widget').length"),2);
         const help=await evaluate("(()=>{const b=document.querySelector('.widget-title-help'),i=b?.querySelector('.app-icon'),t=b?.previousElementSibling;const r=i?.getBoundingClientRect(),h=t?.getBoundingClientRect(),p=b?.closest('.settings-content').getBoundingClientRect(),c=document.querySelector('.widget-preview').getBoundingClientRect(),row=b?.parentElement.getBoundingClientRect();return {width:r?.width,height:r?.height,rightOfTitle:r?.left>=h?.right,titleGap:r?.left-h?.right,centerGap:r?.top+r?.height/2-h?.top-h?.height/2,spaceAbove:h?.top-p?.top,spaceBelow:c.top-h?.bottom,rowHeight:row?.height,titleHeight:h?.height,tapHeight:b?.getBoundingClientRect().height}})()");
         assert.equal(help.width,18,'help icon keeps its original width');
@@ -140,6 +140,9 @@ async function main() {
         assert.ok(refresh.tapWidth>=44 && refresh.tapHeight>=44,'resync keeps a 44px tap target');
         assert.equal(refresh.icons,1);assert.equal(refresh.label,'重新同步课表');
         assert.equal(await evaluate("document.querySelectorAll('.four-line .single-course').length"),4,'two-row preview shows four courses');
+        const spacingCeiling=await evaluate("(()=>{const p=document.querySelector('.four-line'),body=p.querySelector('.single-course-list');const frames=[180,260,400].map(height=>{p.style.height=height+'px';const rows=[...p.querySelectorAll('.single-course')].map(row=>row.getBoundingClientRect()),b=body.getBoundingClientRect();return{height,bodyHeight:b.height,gaps:rows.slice(1).map((r,i)=>r.top-rows[i].bottom)}});p.style.height='';return frames})()");
+        assert.ok(spacingCeiling.every(frame=>frame.bodyHeight<=154.2),'two-row preview course region has a height ceiling');
+        assert.ok(spacingCeiling[1].gaps.every((gap,i)=>Math.abs(gap-spacingCeiling[2].gaps[i])<.2),'stretching above the ceiling leaves course gaps unchanged');
         assert.match(await evaluate("document.querySelector('.single-line:not(.four-line) .single-calendar').textContent"),/10\/12 周一.*第6周/);
         assert.match(await evaluate("document.querySelector('.single-line:not(.four-line) .single-actions').textContent"),/余3堂/);
         const compact = await evaluate("(()=>{const q=s=>document.querySelector('.single-line:not(.four-line) '+s),r=s=>q(s).getBoundingClientRect(),a=r('.single-course'),b=r('.single-course.second');return{courses:document.querySelectorAll('.single-line:not(.four-line) .single-course').length,header:q('.single-topline').textContent,first:q('.single-course').textContent,second:q('.single-course.second').textContent,gap:b.top-a.bottom,headerBottom:r('.single-topline').bottom,firstTop:a.top,day:getComputedStyle(q('.single-day')).fontSize,remaining:getComputedStyle(q('.single-remaining')).fontSize,name:getComputedStyle(q('.single-name')).fontSize,meta:getComputedStyle(q('.single-meta')).fontSize}})()");

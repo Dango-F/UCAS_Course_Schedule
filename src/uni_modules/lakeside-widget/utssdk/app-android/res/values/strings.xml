@@ -1,8 +1,8 @@
 <resources>
-  <string name="ls_widget_large_name">湖畔课表 · 今日课表</string>
-  <string name="ls_widget_small_name">湖畔课表 · 当前课程</string>
+  <string name="ls_widget_large_name">湖畔课表 · 宽松版</string>
+  <string name="ls_widget_small_name">湖畔课表 · 紧凑版</string>
   <string name="ls_widget_large_description">今日或明日全部课程、教师、地点与教学周，支持上下滚动</string>
-  <string name="ls_widget_small_description">一行最多两堂、两行最多四堂，优先当前及后续课程，可查看明日</string>
+  <string name="ls_widget_small_description">一行最多两堂，继续拉高显示更多当前及后续课程，可查看明日</string>
   <string name="ls_widget_settings">小组件设置</string>
   <string name="ls_widget_open">打开完整课表</string>
 </resources>
