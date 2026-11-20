@@ -27,6 +27,23 @@ export function weekReleaseEasing(distance, duration, velocity) {
   return `cubic-bezier(${x1},${y1},.666667,1)`
 }
 
+// Progress on the velocity-matched release, displayed position, and slope.
+// The 0/1/4/1/0% lag forms a cubic spline with continuous speed and acceleration.
+const weekPullStops = [
+  { offset: 0.40, position: 0.40, slope: 1 },
+  { offset: 0.55, position: 0.54, slope: 0.8 },
+  { offset: 0.70, position: 0.66, slope: 1 },
+  { offset: 0.85, position: 0.84, slope: 1.2 },
+  { offset: 1, position: 1, slope: 1 }
+]
+const weekPullSegments = weekPullStops.slice(0, -1).map((start, i) => {
+  const end = weekPullStops[i + 1]
+  // CSS Bézier control points are local to each keyframe interval.
+  const scale = (end.offset - start.offset) / (3 * (end.position - start.position))
+  const easing = `cubic-bezier(${1 / 3},${start.slope * scale},${2 / 3},${1 - end.slope * scale})`
+  return { offset: start.offset, position: start.position, easing }
+})
+
 export function boundWeekPosition(position, last) {
   const rubber = distance => 0.5 - 0.25 / (distance + 0.5)
   return position < 0 ? -rubber(-position) : position > last ? last + rubber(position - last) : position
@@ -133,14 +150,10 @@ export function createStableWeekController(root, initialConfig, notify, editSlot
     if (duration && track.animate) {
       const frames = [{ offset: 0, transform: translation(position) }]
       if (destination !== reported) {
-        // Offsets are progress *after* the velocity-matched easing. Follow the
-        // original path to 75%, then trail it by about 1% before drawing level.
-        // The segment tangents match at both joins; the outer easing stops the track.
-        const at = fraction => translation(position + (destination - position) * fraction)
-        frames.push(
-          { offset: 0.75, transform: at(0.75), easing: 'cubic-bezier(.27,.30,.64,.68)' },
-          { offset: 0.85, transform: at(0.84), easing: 'cubic-bezier(.32,.24,.68,.76)' }
-        )
+        for (const segment of weekPullSegments) {
+          const transform = translation(position + (destination - position) * segment.position)
+          frames.push({ offset: segment.offset, transform, easing: segment.easing })
+        }
       }
       frames.push({ offset: 1, transform: translation(destination) })
       releaseAnimation = track.animate(frames, { duration, easing })

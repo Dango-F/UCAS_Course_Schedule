@@ -115,6 +115,41 @@ async function main() {
       for (let i = 1; i <= steps; i++) { await sleep(delay); await touch('touchMove', from + (to - from) * i / steps); }
       await touch('touchEnd');
     }
+    async function sampleNextWeekPull() {
+      // Seek within the same touchend event, then restore the playhead before paint.
+      await evaluate(`document.querySelector('.calendar-native').addEventListener('touchend', () => {
+        const track = document.querySelector('.week-track');
+        const animation = track.getAnimations()[0];
+        const effect = animation.effect;
+        const playhead = animation.currentTime;
+        const duration = effect.getTiming().duration;
+        const frames = effect.getKeyframes();
+        const from = new DOMMatrixReadOnly(frames[0].transform).m41;
+        const to = new DOMMatrixReadOnly(frames.at(-1).transform).m41;
+        window.weekPull = { duration, remaining: Math.abs(to - from), samples: [] };
+        for (let i = 0; i < 100; i++) {
+          animation.currentTime = i * duration / 100;
+          const x = new DOMMatrixReadOnly(getComputedStyle(track).transform).m41;
+          window.weekPull.samples.push({ position: (x - from) / (to - from), baseline: effect.getComputedTiming().progress });
+        }
+        animation.currentTime = playhead ?? 0;
+      }, { capture: true, once: true })`);
+    }
+    async function checkWeekPull(label) {
+      const { samples, duration, remaining } = await evaluate('window.weekPull');
+      const steps = samples.slice(1).map(({ position, baseline }, i) => ({
+        baseline, step: position - samples[i].position, lag: baseline - position
+      }));
+      const maxLag = Math.max(...steps.map(s => s.lag));
+      assert.ok(steps.every(s => s.step >= 0 && s.lag >= -0.0001), 'continuous travel toward the destination');
+      assert.ok(steps.filter(s => s.baseline <= 0.4).every(s => Math.abs(s.lag) < 0.0001), 'preserves the release from the finger');
+      assert.ok(steps.some(s => s.baseline < 0.6 && s.lag > 0.01) && maxLag > 0.038 && maxLag < 0.041, 'pull develops by mid-travel');
+      const slowest = Math.min(...steps.filter(s => s.baseline > 0.5 && s.baseline < 0.7).map(s => s.step));
+      const pickup = Math.max(...steps.filter(s => s.baseline >= 0.7 && s.baseline < 0.84).map(s => s.step));
+      assert.ok(pickup > slowest * 1.03 && steps.at(-1).step < pickup / 10, 'gradual pickup before a soft stop');
+      checks.push(`${label}: ${duration} ms, maximum shift from base curve ${(maxLag * 100).toFixed(2)}% of remaining travel`);
+      return { duration, remaining };
+    }
     const profileName = process.argv.find(arg => arg.startsWith('--profile='))?.split('=')[1];
     if (profileName) {
       assert.match(profileName, /^[a-z0-9-]+$/i);
@@ -211,8 +246,10 @@ async function main() {
       }
       if (await shownWeek() !== 4) console.log(await evaluate(`({week:document.querySelector('.week-select').textContent, root:document.querySelector('#calendar-swipe-root')?.outerHTML.slice(0,1200), hit:document.elementFromPoint(280, ${y})?.outerHTML.slice(0,250)})`), errors);
       assert.equal(await shownWeek(), 4, `v${version} forward`);
+      if (!comparisonMode) await sampleNextWeekPull();
       await swipe(80, 310); await sleep(450);
       assert.equal(await shownWeek(), 3, `v${version} backward`);
+      if (!comparisonMode) await checkWeekPull('reverse flick');
       await swipe(280, 270, 4, 30); await sleep(350);
       assert.equal(await shownWeek(), 3, `v${version} small return`);
       if (version === 1) {
@@ -277,41 +314,15 @@ async function main() {
           });
           window.slowObserver.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
         })()`);
-        if (!comparisonMode) {
-          // Seek the real release on the browser timeline so display refresh rate
-          // cannot hide its brief pickup. Restore the playhead within the same event.
-          await evaluate(`document.querySelector('.calendar-native').addEventListener('touchend', () => {
-            const track = document.querySelector('.week-track');
-            const animation = track.getAnimations()[0];
-            const effect = animation.effect;
-            const playhead = animation.currentTime;
-            const duration = effect.getTiming().duration;
-            const frames = effect.getKeyframes();
-            const from = new DOMMatrixReadOnly(frames[0].transform).m41;
-            const to = new DOMMatrixReadOnly(frames.at(-1).transform).m41;
-            window.weekPull = { duration, remaining: Math.abs(to - from), samples: [] };
-            for (let i = 0; i < 100; i++) {
-              animation.currentTime = i * duration / 100;
-              const x = new DOMMatrixReadOnly(getComputedStyle(track).transform).m41;
-              window.weekPull.samples.push({ position: (x - from) / (to - from), baseline: effect.getComputedTiming().progress });
-            }
-            animation.currentTime = playhead ?? 0;
-          }, { capture: true, once: true })`);
-        }
+        if (!comparisonMode) await sampleNextWeekPull();
         await touch('touchEnd'); await sleep(55);
         assert.equal(await shownWeek(), 4, `v${version} slow release also updates headings without waiting for the endpoint`);
         assert.match(await evaluate(`(()=>{const e=document.querySelector('.week-track');return e.getAnimations().find(a=>a.effect.getKeyframes().some(f=>f.transform))?.effect.getTiming().easing || e.style.transition})()`), /cubic-bezier/, `v${version} uses compositor settling`);
         await sleep(350);
         const release = await evaluate(`window.slowObserver.disconnect(); ({ ...window.slowRelease, visibleRetained: window.visibleReleasePanels.every(panel => panel.isConnected) })`);
         if (!comparisonMode) {
-          const { samples, duration, remaining } = await evaluate('window.weekPull');
-          const step = i => samples[i].position - samples[i - 1].position;
+          const { duration, remaining } = await checkWeekPull('held forward release');
           assert.equal(duration, Math.round(240 * Math.sqrt(remaining / 390)), 'held release keeps its distance-based duration');
-          assert.ok(samples.every(({ position, baseline }, i) =>
-            Math.abs(position - baseline) < (baseline < 0.75 ? 0.0001 : 0.015) &&
-            position <= 1 && (i === 0 || step(i) >= 0)), 'only the tail changes, within 1.5% of travel');
-          assert.ok(step(80) > step(76) * 1.08 && step(99) < step(80) / 10, 'late pickup followed by a soft stop');
-          checks.push('held release preserves its duration, gently accelerates near alignment and settles monotonically');
         }
         assert.ok(release.styleWrites <= 3, `v${version} does not write the transform every release frame`);
         assert.equal(release.visibleChanges, 0, `v${version} preserves visible course DOM while preparing distant weeks`);
