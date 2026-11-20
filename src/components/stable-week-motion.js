@@ -7,12 +7,15 @@ export function settleWeek(position, velocity, maxWeek) {
   return Math.max(0, Math.min(maxWeek - 1, Math.round(position + flick)))
 }
 
-export function weekDuration(remaining, width, velocity) {
+export function weekDuration(distance, width, velocity) {
+  const remaining = Math.abs(distance)
   if (remaining < 0.5) return 0
   const fraction = Math.min(1, remaining / width)
-  const speed = Math.min(1, Math.abs(velocity) / 1.2)
-  // Slow drags ease out gently; fast repeated flicks retain a short finish.
-  return Math.round(Math.max(50, 64 + fraction * 36 - speed * 19))
+  // Scale time with sqrt(distance) so a slow release has similar acceleration
+  // over short and long distances. Only momentum toward the target shortens it.
+  const pagesPerSecond = Math.sign(distance) * velocity * 1000 / width
+  const speed = Math.max(0, Math.min(1, pagesPerSecond / 3))
+  return Math.round(Math.max(70, (240 - 60 * speed) * Math.sqrt(fraction)))
 }
 
 // For a Bézier easing, the initial speed in pixels/ms is
@@ -117,11 +120,11 @@ export function createStableWeekController(root, initialConfig, notify, editSlot
     resetOffscreenScroll()
     // The target was already reported at release; completion is visual only.
   }
-  function settle(target, velocity = 0, trackVelocity = velocity) {
+  function settle(target, trackVelocity = 0) {
     stop()
     destination = Math.max(0, Math.min(config.maxWeek - 1, target))
     const distance = (destination - position) * width
-    duration = config.reducedMotion || quiet?.matches ? 0 : weekDuration(Math.abs(distance), width, velocity)
+    duration = config.reducedMotion || quiet?.matches ? 0 : weekDuration(distance, width, trackVelocity)
     settling = true
     const token = generation
     started = now()
@@ -237,7 +240,7 @@ export function createStableWeekController(root, initialConfig, notify, editSlot
     const age = Math.max(0, (event.timeStamp ?? now()) - value.sampleTime)
     // Let a stopped finger lose its momentum before the existing 90 ms hold cutoff.
     const retained = Math.max(0, Math.min(1, (90 - age) / 58))
-    settle(target, velocity, (value.trackVelocity ?? 0) * retained)
+    settle(target, (value.trackVelocity ?? 0) * retained)
   }
   function cancel() {
     if (!gesture) return

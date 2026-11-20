@@ -14,9 +14,15 @@ describe('V2 stable-slot decisions', () => {
   it('gives slow releases a gentler finish and short flicks a quicker finish', () => {
     expect(weekDuration(200, 390, 0)).toBeGreaterThan(weekDuration(200, 390, 1))
     expect(weekDuration(0.1, 390, 0)).toBe(0)
-    expect(weekDuration(5, 390, 1.2)).toBe(50)
-    expect(weekDuration(195, 390, 0)).toBe(82)
-    expect(weekDuration(390, 390, 0)).toBe(100)
+    expect(weekDuration(5, 390, 1.2)).toBe(70)
+    expect(weekDuration(195, 390, 0)).toBe(170)
+    expect(weekDuration(390, 390, 0)).toBe(240)
+  })
+  it('shortens a flick only for momentum toward the destination, relative to page width', () => {
+    expect(weekDuration(195, 390, 1.2)).toBe(127)
+    expect(weekDuration(-195, 390, -1.2)).toBe(127)
+    expect(weekDuration(390, 780, 2.4)).toBe(127)
+    expect(weekDuration(195, 390, -1.2)).toBe(weekDuration(195, 390, 0))
   })
   it('starts moving at the painted finger speed in either direction and stops at the destination', () => {
     for (const [distance, duration, speed] of [[-80, 170, -.61], [40, 180, 1.5], [100, 200, -.8]]) {
