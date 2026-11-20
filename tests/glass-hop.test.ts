@@ -97,12 +97,12 @@ describe('hop timeline', () => {
 
 describe('navigation motion preference', () => {
   afterEach(() => vi.unstubAllGlobals())
-  it('keeps hop as the default and persists flow independently of glass clarity', () => {
+  it('defaults to flow and persists hop independently of glass clarity', () => {
     const data = new Map()
     vi.stubGlobal('uni',{getStorageSync:vi.fn(key=>data.get(key)),setStorageSync:vi.fn((key,value)=>data.set(key,value))})
     setActivePinia(createPinia())
     const store = useAppearanceStore(), clarity=store.glassClarity
-    expect(store.navMotion).toBe('hop')
+    expect(store.navMotion).toBe('flow')
     store.setNavMotion('hop')
     expect(store.glassClarity).toBe(clarity)
     setActivePinia(createPinia())
@@ -114,7 +114,7 @@ describe('navigation motion preference', () => {
     vi.stubGlobal('uni',{getStorageSync:()=> 'invalid',setStorageSync:()=>{throw Error('full')}})
     setActivePinia(createPinia())
     const store=useAppearanceStore()
-    expect(store.navMotion).toBe('hop')
+    expect(store.navMotion).toBe('flow')
     store.setNavMotion('hop')
     expect(store.navMotion).toBe('hop')
     expect(store.motionSaveError).toBe(true)

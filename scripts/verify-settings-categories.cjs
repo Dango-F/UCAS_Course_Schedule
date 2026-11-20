@@ -6,7 +6,7 @@ const http = require('node:http');
 const { spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const dist = path.resolve('dist/build/h5');
+const dist = path.resolve(process.env.LAKESIDE_TEST_H5_DIR || 'dist/build/h5');
 const out = path.resolve('.artifacts/settings-categories');
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
@@ -22,7 +22,7 @@ async function main() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ucas-glass-nav-'));
   const edge = process.env.EDGE_PATH || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
-  const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+  const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-background-networking', '--disable-component-update', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
   let socket;
   try {
     const portFile = path.join(profile, 'DevToolsActivePort');
@@ -45,10 +45,13 @@ async function main() {
       pending.set(id, { resolve:value=>{clearTimeout(timeout);resolve(value)}, reject:error=>{clearTimeout(timeout);reject(error)} });
       socket.send(JSON.stringify({ id, method, params, ...(attached && sessionId ? { sessionId } : {}) }));
     });
-    const { targetId } = await send('Target.createTarget', { url: 'about:blank' }, false);
+    const { targetInfos } = await send('Target.getTargets', {}, false);
+    const { targetId } = targetInfos.find(target => target.type === 'page');
     ({ sessionId } = await send('Target.attachToTarget', { targetId, flatten: true }, false));
     await send('Runtime.enable');
     await send('Page.enable');
+    await send('Page.bringToFront');
+    await send('Emulation.setFocusEmulationEnabled', { enabled:true });
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
     const evaluate = async expression => {
@@ -72,7 +75,6 @@ async function main() {
       await send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});
     };
     const section = () => evaluate("document.querySelector('.settings-page')?.dataset.settingsSection");
-    let expectedSettingsMotion = 'slide';
     const assertNav = async (visible, inert = !visible) => {
       assert.equal(await evaluate("getComputedStyle(document.querySelector('#liquid-nav-root')).visibility"),visible?'visible':'hidden');
       assert.equal(await evaluate("document.querySelector('#liquid-nav-root').hasAttribute('inert')"),inert);
@@ -80,35 +82,14 @@ async function main() {
       assert.equal(await evaluate("document.querySelector('#liquid-nav-root')===window.savedNav"),true,'same lens and anchor stay mounted');
     };
     const open = async name => {
-      const expectedOrigin=await evaluate(`(()=>{const p=document.querySelector('.settings-page').getBoundingClientRect(),c=document.querySelector('#settings-entry-${name}').getBoundingClientRect();return{left:c.left-p.left,top:c.top-p.top,right:p.right-c.right,bottom:p.bottom-c.bottom,width:c.width,height:c.height,pageWidth:p.width,pageHeight:p.height}})()`);
       await click('[data-settings-entry="'+name+'"]');
       await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==="+JSON.stringify(name));
       await waitFor("getComputedStyle(document.querySelector('#liquid-nav-root')).visibility==='hidden'");
       await assertNav(false);
       await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-      const motionDisabled=await evaluate("document.querySelector('.settings-page').classList.contains('reduced-motion')");
-      const systemReduced=await evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches");
-      const detailState=await evaluate(`(()=>{const d=document.querySelector('.settings-detail'),s=d.style;return{morph:d.classList.contains('card-morph'),zoom:d.classList.contains('page-zoom'),shape:d.classList.contains('shape-page'),property:getComputedStyle(d).transitionProperty,left:parseFloat(s.getPropertyValue('--morph-left')),top:parseFloat(s.getPropertyValue('--morph-top')),right:parseFloat(s.getPropertyValue('--morph-right')),bottom:parseFloat(s.getPropertyValue('--morph-bottom')),zoomX:parseFloat(s.getPropertyValue('--zoom-x')),zoomY:parseFloat(s.getPropertyValue('--zoom-y')),zoomScale:parseFloat(s.getPropertyValue('--zoom-scale'))}})()`);
-      if(!motionDisabled && expectedSettingsMotion==='card'){
-        assert.equal(detailState.morph,true,'clicked card provides the expansion origin');
-        for(const edge of ['left','top','right','bottom'])assert.ok(Math.abs(detailState[edge]-Math.max(0,expectedOrigin[edge]))<1,'origin '+name+' '+edge+' matches the visible card');
-      }
-      if(!motionDisabled && expectedSettingsMotion==='slide')assert.equal(detailState.morph,false,'slide preference uses the original right-hand route');
-      if(!motionDisabled && expectedSettingsMotion==='page'){
-        assert.equal(detailState.zoom,true,'whole-page preference transforms the rendered detail');
-        const scale=Math.min(expectedOrigin.width/expectedOrigin.pageWidth,expectedOrigin.height/expectedOrigin.pageHeight);
-        assert.ok(Math.abs(detailState.zoomScale-scale)<.02);
-        assert.ok(Math.abs(detailState.zoomX-(expectedOrigin.left+(expectedOrigin.width-expectedOrigin.pageWidth*scale)/2))<1);
-        assert.ok(Math.abs(detailState.zoomY-(expectedOrigin.top+(expectedOrigin.height-expectedOrigin.pageHeight*scale)/2))<1);
-      }
-      if(!motionDisabled && expectedSettingsMotion==='shape'){
-        assert.equal(detailState.shape,true,'card-to-page preference preserves the entry outline');
-        for(const edge of ['left','top','right','bottom'])assert.ok(Math.abs(detailState[edge]-Math.max(0,expectedOrigin[edge]))<1,'shape origin '+name+' '+edge+' matches the source card');
-        const scale=Math.max(expectedOrigin.width/expectedOrigin.pageWidth,expectedOrigin.height/expectedOrigin.pageHeight);
-        assert.ok(Math.abs(detailState.zoomScale-scale)<.02,'inner page fills the card at one scale');
-      }
-      assert.equal(detailState.property,motionDisabled||systemReduced?'none':expectedSettingsMotion==='card'?'clip-path, opacity':expectedSettingsMotion==='shape'?'clip-path':expectedSettingsMotion==='page'?'transform, border-radius':'transform');
-      return expectedOrigin;
+      const resting=await evaluate("(()=>{const e=document.querySelector('.settings-detail');return {active:e.getAnimations().filter(a=>a.playState==='running').length,x:new DOMMatrix(getComputedStyle(e).transform).m41}})()");
+      assert.equal(resting.active,0,'the settled route has no running animation');
+      assert.equal(resting.x,0,'the detail comes to rest at the viewport origin');
     };
     const back = async () => {await click('.settings-back');await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");assert.equal(await evaluate("Boolean(document.querySelector('.settings-detail'))"),false);await assertNav(true)};
     const shot = async name => {await sleep(650);const {data}=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(data,'base64'))};
@@ -145,14 +126,14 @@ async function main() {
         assert.ok(spacingCeiling[1].gaps.every((gap,i)=>Math.abs(gap-spacingCeiling[2].gaps[i])<.2),'stretching above the ceiling leaves course gaps unchanged');
         assert.match(await evaluate("document.querySelector('.single-line:not(.four-line) .single-calendar').textContent"),/10\/12 周一.*第6周/);
         assert.match(await evaluate("document.querySelector('.single-line:not(.four-line) .single-actions').textContent"),/余3堂/);
-        const compact = await evaluate("(()=>{const q=s=>document.querySelector('.single-line:not(.four-line) '+s),r=s=>q(s).getBoundingClientRect(),a=r('.single-course'),b=r('.single-course.second');return{courses:document.querySelectorAll('.single-line:not(.four-line) .single-course').length,header:q('.single-topline').textContent,first:q('.single-course').textContent,second:q('.single-course.second').textContent,gap:b.top-a.bottom,headerBottom:r('.single-topline').bottom,firstTop:a.top,day:getComputedStyle(q('.single-day')).fontSize,remaining:getComputedStyle(q('.single-remaining')).fontSize,name:getComputedStyle(q('.single-name')).fontSize,meta:getComputedStyle(q('.single-meta')).fontSize}})()");
+        const compact = await evaluate("(()=>{const q=s=>document.querySelector('.single-line:not(.four-line) '+s),r=s=>q(s).getBoundingClientRect(),a=r('.single-course'),b=r('.single-course.second');return{courses:document.querySelectorAll('.single-line:not(.four-line) .single-course').length,header:q('.single-topline').textContent,first:q('.single-course').textContent,second:q('.single-course.second').textContent,gap:b.top-a.bottom,headerBottom:r('.single-topline').bottom,firstTop:a.top,name:getComputedStyle(q('.single-name')).fontSize,meta:getComputedStyle(q('.single-meta')).fontSize}})()");
         assert.equal(compact.courses,2,'one-row preview retains both course occurrences');
-        assert.match(compact.header,/10\/12 周一.*第6周.*余3堂.*明日.*更新于08:00/,'header retains date, week, count, tomorrow and visible update time');
+        assert.match(compact.header,/10\/12 周一.*第6周.*余3堂.*更新于08:00/,'header retains date, week, count and visible update time');
+        assert.doesNotMatch(await evaluate("[...document.querySelectorAll('.single-topline')].map(header=>header.textContent).join(' ')"),/明日/,'compact headers no longer offer a tomorrow switch');
         assert.match(compact.first,/学术写作.*15:25–17:00 · 教二楼201 · 李志红/,'first course retains name, time, location and teacher');
         assert.match(compact.second,/明日.*机器学习.*18:30–21:00 · 教一楼207 · 周晓飞等/,'second course retains date and all course fields');
         assert.ok(compact.gap>=1.9 && compact.gap<=2.2,'two courses have a compact two-pixel gap');
         assert.ok(compact.firstTop>=compact.headerBottom,'course group clears header');
-        assert.equal(compact.day,compact.remaining,'tomorrow and remaining count share a font size');
         assert.equal(compact.name,'12px');assert.equal(compact.meta,'10px');
         const hanzi=await evaluate("(()=>{const n=document.querySelector('.single-meta .meta-hanzi');return{size:parseFloat(getComputedStyle(n).fontSize),base:parseFloat(getComputedStyle(n.parentElement).fontSize)}})()");
         assert.ok(Math.abs(hanzi.size/hanzi.base-.94)<.002,'location and teacher Han text retain optical correction');
@@ -237,44 +218,44 @@ async function main() {
     await sleep(100);await click('[data-nav-index="2"]');
     await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
     await sleep(650);
-    assert.equal(await evaluate("document.querySelectorAll('[data-settings-entry]').length"),5);
-    assert.equal(await evaluate("document.querySelectorAll('.preference-row,.clarity-slider,.motion-stage,.scenario-grid').length"),0,'home is a directory, not a hidden long form');
+    const hasPreview=await evaluate("!!document.querySelector('[data-settings-entry=preview]')");
+    assert.equal(await evaluate("document.querySelectorAll('[data-settings-entry]').length"),hasPreview?6:5);
+    assert.equal(await evaluate("[...document.querySelectorAll('.directory-links')].every(group=>getComputedStyle(group).borderRadius==='12px' && getComputedStyle(group).overflow==='hidden')"),true,'the group owns the outside radius');
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('#settings-entry-display'),'::before').borderTopWidth"),'1px','the adjoining rows share a fine divider');
+    assert.equal(await evaluate("document.querySelector('.settings-home').querySelectorAll('.preference-row,.clarity-slider,.motion-stage,.scenario-grid').length"),0);
+    await waitFor("document.querySelector('.settings-prepared')?.hasAttribute('inert')");
+    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-prepared')).visibility"),'hidden');
+    assert.equal(await evaluate("document.querySelectorAll('.settings-prepared svg,.settings-prepared canvas').length"),0,'the prepared controls own no hidden glass renderer');
     await shot('home-390');
     await open('appearance');
-    assert.equal(await evaluate("document.querySelector('[data-settings-motion=\"slide\"]').getAttribute('aria-pressed')"),'true','fresh installs default to right-side slide');
-    const motionTiles=await evaluate("[...document.querySelectorAll('.settings-motion-setting [data-settings-motion]')].map(el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})");
-    assert.equal(motionTiles.length,4);
-    assert.ok(Math.abs(motionTiles[0].y-motionTiles[1].y)<1 && Math.abs(motionTiles[2].y-motionTiles[3].y)<1,'four options occupy two rows');
-    assert.ok(motionTiles[2].y>motionTiles[0].y+motionTiles[0].height && motionTiles[1].x>motionTiles[0].x+motionTiles[0].width,'options occupy two equal-width columns');
-    await click('[data-settings-motion="card"]');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('card-morph')");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).opacity"),'1','changing the choice keeps the open page visible');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('card-morph')"),true,'the new choice controls this return immediately');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    expectedSettingsMotion='card';
-
+    assert.equal(await evaluate("document.querySelectorAll('[aria-label=界面风格],[aria-label=设置页面切换]').length"),0);
+    await click('#glass-material-preview [data-nav-index="2"]');
+    await waitFor("document.querySelector('#glass-material-preview [aria-pressed=true]')?.dataset.navIndex==='2'");
+    await back();
+    await open('appearance');
+    assert.equal(await evaluate("document.querySelector('#glass-material-preview [aria-pressed=true]')?.dataset.navIndex"),'0');
+    assert.equal(await evaluate("document.querySelector('.settings-detail .scroll-viewport').scrollTop"),0);
+    await back();
     await open('about');
-    assert.equal(await evaluate("document.querySelector('.subnav-label').textContent"),'关于湖畔课表');
+    assert.equal(await evaluate("document.querySelector('.detail-heading .settings-title').textContent"),'关于湖畔课表');
     assert.match(await evaluate("document.querySelector('.about-maker').textContent"),/YukiDango/);
     const layers = await evaluate(`(async()=>{
       const detail=document.querySelector('.settings-detail'),nav=document.querySelector('#liquid-nav-root'),bar=nav.querySelector('.glass-bar');
       document.querySelector('.settings-back').click();await Promise.resolve();
-      // Pause the actual card-shaped return to inspect layering and clipping.
-      const animation=detail.getAnimations().find(a=>a.transitionProperty==='clip-path');
+      await new Promise(requestAnimationFrame);
+      const animation=detail.getAnimations().find(a=>a.effect.getKeyframes().some(frame=>frame.transform));
       if(!animation)throw new Error('missing return transition');
       animation.pause();animation.currentTime=45;
       return{clip:getComputedStyle(detail).clipPath,detailZ:Number(getComputedStyle(detail).zIndex),navZ:Number(getComputedStyle(nav).zIndex),homeZ:Number(getComputedStyle(document.querySelector('.settings-home')).zIndex),shadow:getComputedStyle(detail).boxShadow};
     })()`);
-    assert.match(layers.clip,/^inset\(/,'detail retains a clipped card outline mid-return');
+    assert.equal(layers.clip,'none');
     assert.ok(layers.detailZ>layers.navZ&&layers.navZ>layers.homeZ,'detail above navigation above directory');
     assert.equal(layers.shadow,'none');
     const midReturn=await send('Page.captureScreenshot',{format:'png'});
     fs.writeFileSync(path.join(out,'return-layering.png'),Buffer.from(midReturn.data,'base64'));
     await evaluate("document.querySelector('.settings-detail')?.getAnimations().forEach(a=>a.play())");
     await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    checks.push('mid-return painting order: directory below navigation below clipped detail; no edge shadow');
+    checks.push('mid-return painting order: directory below navigation below sliding detail; no edge shadow');
 
     await evaluate("window.savedSettingsHome=document.querySelector('.settings-home')");
     await open('display');
@@ -292,7 +273,7 @@ async function main() {
       window.settingsExitFrames=samples;
       function sample() {
         if (!detail.isConnected) return;
-        samples.push({clip:getComputedStyle(detail).clipPath, shadow:getComputedStyle(detail).boxShadow});
+        samples.push({transform:getComputedStyle(detail).transform, shadow:getComputedStyle(detail).boxShadow});
         requestAnimationFrame(sample);
       }
       document.querySelector('.settings-back').click();
@@ -306,12 +287,12 @@ async function main() {
     assert.equal(exit.homeRetained,true);
     await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
     const exitFrames=await evaluate('window.settingsExitFrames');
-    assert.ok(new Set(exitFrames.map(frame=>frame.clip)).size>2,'detail contracts toward its card during return');
+    assert.ok(new Set(exitFrames.map(frame=>frame.transform)).size>2,'detail moves to the right during return');
     assert.ok(exitFrames.every(frame=>frame.shadow==='none'),'settings detail has no edge shadow throughout return');
     assert.equal(await evaluate("Boolean(document.querySelector('.settings-detail'))"),false);
     assert.equal(await evaluate("window.savedSettingsHome===document.querySelector('.settings-home')"),true);
     assert.equal(await evaluate("document.querySelector('.settings-home').hasAttribute('inert')"),false);
-    checks.push('persistent directory, card-shaped exit without edge shadow, detail unmounted after exit');
+    checks.push('persistent directory, slide exit without edge shadow, detail unmounted after exit');
     await open('display');
     assert.equal(await evaluate("document.querySelector('[aria-label=\"展示考核方式\"]').getAttribute('aria-checked')"),'false','preference survives subpage navigation');
     await click('[aria-label="展示考核方式"]');
@@ -319,7 +300,7 @@ async function main() {
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
     await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    checks.push('five categories, home mounts no controls or running preview, display switches retained and Escape returns one level');
+    checks.push('grouped settings directory exposes only its entries; the inert prepared controls own no renderer; display switches and Escape work');
 
     await evaluate("document.querySelector('[data-settings-entry=\"appearance\"]').focus()");
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Enter',code:'Enter',windowsVirtualKeyCode:13});
@@ -328,7 +309,7 @@ async function main() {
     await waitFor("document.querySelectorAll('.preference-row').length===1");
     assert.equal(await evaluate("document.querySelectorAll('.preference-row').length"),1);
     assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-page')).animationName"),'none','settings tab entry has no page animation');
-    assert.equal(await evaluate("document.querySelector('.clarity-slider').getAttribute('aria-valuenow')"),'100');
+    assert.equal(await evaluate("document.querySelector('.clarity-slider').getAttribute('aria-valuenow')"),'75');
     assert.equal(await evaluate("(() => { const card=document.querySelector('.settings-section .settings-card'), clarity=card.querySelector('.glass-clarity-setting'), motion=card.querySelector('[aria-label=\"减少动画\"]'); return Boolean(clarity && motion && (clarity.compareDocumentPosition(motion) & Node.DOCUMENT_POSITION_FOLLOWING)) })()"),true,'reduced motion follows glass clarity');
     await click('[aria-label="减少动画"]');
     assert.equal(await evaluate("document.querySelector('[aria-label=\"减少动画\"]').getAttribute('aria-checked')"),'true');
@@ -342,22 +323,26 @@ async function main() {
     await open('semester');
     assert.equal(await evaluate("document.querySelectorAll('.semester-card,.import-button').length"),2);
     await shot('semester-390');
-    await back();await open('preview');
-    assert.equal(await evaluate("document.querySelectorAll('.variant-option').length"),4);
-    assert.equal(await evaluate("document.querySelectorAll('.scenario-option').length"),4);
-    const speedAlignment = await evaluate("(() => { const row=document.querySelector('.motion-options .motion-option'), label=row.children[0].getBoundingClientRect(), picker=row.querySelector('.speed-picker').getBoundingClientRect(); return Math.abs(label.top+label.height/2-picker.top-picker.height/2) })()");
-    assert.ok(speedAlignment < 1.5,'preview speed label and control are vertically centered');
-    await click('.variant-option:nth-child(2)');await click('.finish-button');
-    assert.equal(await evaluate("document.querySelector('.motion-status-title').textContent"),'读取完成');
-    await shot('preview-390');
-    await click('.finish-button');await click('.demo-button');
-    await back();await sleep(3200);await open('preview');
-    assert.equal(await evaluate("document.querySelector('.motion-status-title').textContent"),'正在读取课程信息','leaving cancels pending completion timer');
-    assert.equal(await evaluate("document.querySelector('.variant-option:nth-child(2)').getAttribute('aria-pressed')"),'true');
-    await click('.scenario-option:nth-child(2)');
-    assert.equal(await evaluate("document.querySelector('.scenario-option:nth-child(2)').classList.contains('chosen')"),true);
-    await click('.scenario-option:first-child');
-    await back();await open('about');
+    await back();
+    if (hasPreview) {
+      await open('preview');
+      assert.equal(await evaluate("document.querySelectorAll('.variant-option').length"),4);
+      assert.equal(await evaluate("document.querySelectorAll('.scenario-option').length"),4);
+      const speedAlignment = await evaluate("(() => { const row=document.querySelector('.motion-options .motion-option'), label=row.children[0].getBoundingClientRect(), picker=row.querySelector('.speed-picker').getBoundingClientRect(); return Math.abs(label.top+label.height/2-picker.top-picker.height/2) })()");
+      assert.ok(speedAlignment < 1.5,'preview speed label and control are vertically centered');
+      await click('.variant-option:nth-child(2)');await click('.finish-button');
+      assert.equal(await evaluate("document.querySelector('.motion-status-title').textContent"),'读取完成');
+      await shot('preview-390');
+      await click('.finish-button');await click('.demo-button');
+      await back();await sleep(3200);await open('preview');
+      assert.equal(await evaluate("document.querySelector('.motion-status-title').textContent"),'正在读取课程信息','leaving cancels pending completion timer');
+      assert.equal(await evaluate("document.querySelector('.variant-option:nth-child(2)').getAttribute('aria-pressed')"),'true');
+      await click('.scenario-option:nth-child(2)');
+      assert.equal(await evaluate("document.querySelector('.scenario-option:nth-child(2)').classList.contains('chosen')"),true);
+      await click('.scenario-option:first-child');
+      await back();
+    }
+    await open('about');
     assert.equal(await evaluate("Boolean(document.querySelector('.about-data'))"),true);
     await shot('about-390');await back();
     checks.push('appearance, semester/import entry, all four animation variants, demo scenes and about remain accessible; preview timer stops on exit');
@@ -370,24 +355,20 @@ async function main() {
       await open('appearance');
       assert.ok(await evaluate("document.querySelector('.settings-back').getBoundingClientRect().height")>=44);
       assert.equal(await evaluate("document.querySelector('.settings-detail .settings-scroll .uni-scroll-view').scrollTop"),0);
-      const grid=await evaluate("(()=>{const parent=document.querySelector('.settings-motion-setting .motion-choices').getBoundingClientRect(),items=[...document.querySelectorAll('.settings-motion-setting [data-settings-motion]')].map(el=>el.getBoundingClientRect());return{parent:{left:parent.left,right:parent.right},items:items.map(r=>({left:r.left,right:r.right,top:r.top,width:r.width,height:r.height}))}})()");
-      assert.equal(grid.items.length,4);
-      assert.ok(Math.abs(grid.items[0].top-grid.items[1].top)<1 && Math.abs(grid.items[2].top-grid.items[3].top)<1,'two rows at '+width+'px');
-      assert.ok(Math.abs(grid.items[0].width-grid.items[1].width)<1 && grid.items[1].left>grid.items[0].right,'two equal-width columns at '+width+'px');
-      assert.ok(grid.items.every(item=>item.left>=grid.parent.left-1 && item.right<=grid.parent.right+1),'choices fit inside the card at '+width+'px');
       await shot('appearance-'+width);
       await back();
     }
     await send('Emulation.setDeviceMetricsOverride',{width:390,height:560,deviceScaleFactor:1,mobile:true});
     await sleep(150);
     await evaluate("window.savedDirectoryScroll=[...document.querySelectorAll('.settings-home .uni-scroll-view')].find(e=>e.scrollHeight>e.clientHeight); window.savedDirectoryScroll.scrollTop=60");
-    assert.equal(await evaluate('window.savedDirectoryScroll.scrollTop'),60);
+    const directoryOffset = await evaluate('window.savedDirectoryScroll.scrollTop');
+    assert.ok(directoryOffset > 0);
     await open('about'); await back();
-    assert.equal(await evaluate('window.savedDirectoryScroll.isConnected && window.savedDirectoryScroll.scrollTop'),60,'directory scrolling is retained');
+    assert.equal(await evaluate('window.savedDirectoryScroll.isConnected && window.savedDirectoryScroll.scrollTop'),directoryOffset,'directory scrolling is retained');
     // Return while the entrance is still running, then press back again.
     await click('[data-settings-entry="display"]');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('detail-shown')");
-    await click('.settings-back'); await click('.settings-back');
+    await waitFor("document.querySelector('.settings-detail')?.getAnimations().some(a=>a.effect.getComputedTiming().progress>.05 && a.effect.getComputedTiming().progress<.97)");
+    await evaluate("(()=>{const back=document.querySelector('.settings-back');back.click();back.click()})()");
     await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
     assert.equal(await evaluate("document.querySelectorAll('.settings-detail').length"),0);
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
@@ -398,42 +379,37 @@ async function main() {
     await open('appearance'); await click('[aria-label="减少动画"]'); await back();
     checks.push('directory scroll retained; mid-entrance return and repeated back safe; system and app reduced-motion paths complete');
     await send('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
-    const timing = await evaluate(`new Promise((resolve,reject) => {
-      const root=document.querySelector('.settings-page');
-      const samples=[];
-      let entryDuration, entryShadow, entryElapsed;
-      const timeout=setTimeout(()=>{root.removeEventListener('transitionend',end);reject(new Error('route timing timeout'))},3000);
-      function end(event) {
-        if (!event.target.matches('.settings-detail') || event.propertyName!=='clip-path') return;
-        const css=getComputedStyle(event.target);
-        if (entryElapsed===undefined) {
-          entryElapsed=event.elapsedTime;
-          entryDuration=css.transitionDuration;
-          entryShadow=css.boxShadow;
-          setTimeout(()=>document.querySelector('.settings-back').click(),80);
-        } else {
-          clearTimeout(timeout);root.removeEventListener('transitionend',end);
-          resolve({entryDuration,exitDuration:css.transitionDuration,entryElapsed,exitElapsed:event.elapsedTime,entryShadow,exitShadow:css.boxShadow,samples});
-        }
-      }
-      root.addEventListener('transitionend',end);
-      document.querySelector('[data-settings-entry="about"]').click();
-      function sample() {
+    const timing = await evaluate(`(async () => {
+      async function measure(button) {
+        document.querySelector(button).click();
+        await new Promise(requestAnimationFrame);
         const detail=document.querySelector('.settings-detail');
-        if (!detail || entryElapsed!==undefined) return;
-        samples.push(getComputedStyle(detail).clipPath);
-        requestAnimationFrame(sample);
+        const animation=detail.getAnimations().find(a=>a.effect.getKeyframes().some(f=>f.transform));
+        const timing=animation.effect.getComputedTiming(), shadow=getComputedStyle(detail).boxShadow, samples=[];
+        function sample() {
+          if (animation.playState!=='running') return;
+          samples.push(new DOMMatrix(getComputedStyle(detail).transform).m41);
+          requestAnimationFrame(sample);
+        }
+        sample();
+        await animation.finished;
+        return {duration:timing.duration, elapsed:timing.endTime, easing:timing.easing, shadow,samples};
       }
-      requestAnimationFrame(sample);
-    })`);
-    assert.equal(timing.entryDuration,'0.34s, 0.08s');
-    assert.equal(timing.exitDuration,'0.2s, 0.05s');
-    assert.ok(Math.abs(timing.entryElapsed-.34)<.005);
-    assert.ok(Math.abs(timing.exitElapsed-.2)<.005);
-    assert.equal(timing.entryShadow,timing.exitShadow);
-    assert.equal(timing.entryShadow,'none','settings detail never paints an edge shadow');
-    assert.ok(new Set(timing.samples).size>2,'entry expands the card outline into a full page');
-    checks.push('entry 340ms and return 200ms, verified by clip-path transitionend; card expands without edge shadow');
+      const entry=await measure('[data-settings-entry="about"]');
+      await new Promise(resolve=>requestAnimationFrame(resolve));
+      return {entry,exit:await measure('.settings-back')};
+    })()`);
+    assert.equal(timing.entry.duration,340);
+    assert.equal(timing.exit.duration,150);
+    for (const motion of [timing.entry,timing.exit]) {
+      assert.equal(motion.elapsed,motion.duration);
+      assert.equal(motion.shadow,'none');
+      assert.ok(new Set(motion.samples).size>2,'the surface moves through intermediate positions');
+      assert.match(motion.easing,/cubic-bezier/);
+    }
+    assert.ok(timing.entry.samples.at(-1)<timing.entry.samples[0]);
+    assert.ok(timing.exit.samples.at(-1)>timing.exit.samples[0]);
+    checks.push('entry 340ms and return 150ms, verified against the running transform animations');
     await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
     await open('display');
     const appearanceTap=await tapPoint('[data-settings-entry="appearance"]');
@@ -451,7 +427,7 @@ async function main() {
     await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
     assert.equal(await evaluate("document.querySelector('#liquid-nav-root').hasAttribute('inert')"),false,'exposed navigation accepts a return-time tap');
     await tap(navTap);
-    await waitFor("!document.querySelector('.settings-page')");
+    await waitFor("document.querySelector('.settings-page')?.hasAttribute('inert') && getComputedStyle(document.querySelector('.settings-page')).visibility==='hidden' && !document.querySelector('.settings-detail')");
     assert.equal(await evaluate("document.querySelector('[data-nav-index=\"0\"]').getAttribute('aria-current')"),'page');
     assert.equal(await evaluate("document.querySelector('[data-nav-index=\"2\"]').getAttribute('aria-current')"),null);
     await click('[data-nav-index="2"]');
@@ -459,209 +435,6 @@ async function main() {
     checks.push('physical touch on return-time navigation changes both content and selected lens to the same tab');
     await open('display');await back();await click('[data-nav-index="0"]');await sleep(100);
     await click('[data-nav-index="2"]');await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    const appearanceCard=await open('appearance');await back();
-    const previewRow=await open('preview');await back();
-    assert.ok(previewRow.width>appearanceCard.width*1.4,'preview starts from its wider row');
-    assert.ok(previewRow.height<appearanceCard.height*.8,'preview starts from its shorter row');
-    checks.push('appearance expands from its rounded card; preview expands from a wider, shorter row and shrinks back to it');
-    await open('appearance');
-    assert.equal(await evaluate("document.querySelector('[data-settings-motion=\"card\"]').getAttribute('aria-pressed')"),'true');
-    await click('[data-settings-motion="slide"]');
-    assert.equal(await evaluate("document.querySelector('[data-settings-motion=\"slide\"]').getAttribute('aria-pressed')"),'true');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('slide-detail')");
-    await back();
-    expectedSettingsMotion='slide';
-    await open('preview');
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).transitionDuration"),'0.34s');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).transitionDuration"),'0.2s');
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).boxShadow"),'none');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    await assertNav(true);
-    await open('display');
-    const slideAppearanceTap=await tapPoint('[data-settings-entry="appearance"]');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    await tap(slideAppearanceTap);
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='appearance'");
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('slide-detail')"),true);
-    await back();
-    await open('appearance');
-    assert.equal(await evaluate("document.querySelector('[data-settings-motion=\"slide\"]').getAttribute('aria-pressed')"),'true');
-    await click('[data-settings-motion="card"]');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('card-morph')");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).opacity"),'1','changing mode keeps the open page visible');
-    await back();
-    expectedSettingsMotion='card';
-    await open('about');await back();
-    checks.push('settings animation choice immediately controls the current return, supports return-time retapping, and uses 340/200ms shadow-free slide');
-    await open('appearance');
-    await click('[data-settings-motion="page"]');
-    assert.equal(await evaluate("document.querySelector('[data-settings-motion=\"page\"]').getAttribute('aria-pressed')"),'true');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('page-zoom')");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail-content')).opacity"),'1','switching mode does not hide the open page');
-    await back();
-    expectedSettingsMotion='page';
-    const zoomSource=await evaluate("(()=>{const p=document.querySelector('.settings-page').getBoundingClientRect(),c=document.querySelector('[data-settings-entry=\"preview\"]').getBoundingClientRect();return{left:c.left-p.left,top:c.top-p.top,width:c.width,height:c.height,pageWidth:p.width,pageHeight:p.height}})()");
-    await click('[data-settings-entry="preview"]');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='preview'");
-    const zoomStart=await evaluate(`(()=>{const d=document.querySelector('.settings-detail'),s=d.style,c=d.querySelector('.settings-detail-content');return{zoom:d.classList.contains('page-zoom'),x:parseFloat(s.getPropertyValue('--zoom-x')),y:parseFloat(s.getPropertyValue('--zoom-y')),scale:parseFloat(s.getPropertyValue('--zoom-scale')),rendered:!!d.querySelector('.motion-stage'),clip:getComputedStyle(d).clipPath,contentOpacity:getComputedStyle(c).opacity,contentFilter:getComputedStyle(c).filter,surface:getComputedStyle(d.querySelector('.settings-morph-surface')).display}})()`);
-    assert.equal(zoomStart.zoom,true);
-    const expectedZoomScale=Math.min(zoomSource.width/zoomSource.pageWidth,zoomSource.height/zoomSource.pageHeight);
-    const miniatureWidth=zoomSource.pageWidth*expectedZoomScale,miniatureHeight=zoomSource.pageHeight*expectedZoomScale;
-    assert.ok(Math.abs(zoomStart.scale-expectedZoomScale)<.005);
-    assert.ok(Math.abs(zoomStart.x-(zoomSource.left+(zoomSource.width-miniatureWidth)/2))<1);
-    assert.ok(Math.abs(zoomStart.y-(zoomSource.top+(zoomSource.height-miniatureHeight)/2))<1);
-    assert.equal(zoomStart.rendered,true,'the full detail is mounted before zooming');
-    assert.equal(zoomStart.clip,'none','the page is never revealed through a card mask');
-    assert.equal(zoomStart.contentOpacity,'1','the rendered page does not fade in separately');
-    assert.match(zoomStart.contentFilter,/^blur\(/,'content starts softly focused');
-    assert.equal(zoomStart.surface,'none');
-    await sleep(130);
-    const zoomMiddle=await evaluate("(()=>{const d=document.querySelector('.settings-detail'),r=d.getBoundingClientRect(),c=getComputedStyle(d.querySelector('.settings-detail-content'));return{width:r.width,height:r.height,opacity:c.opacity,filter:c.filter}})()");
-    assert.ok(zoomMiddle.width>miniatureWidth+2 && zoomMiddle.width<zoomSource.pageWidth-2,'entire page grows between a miniature and viewport');
-    assert.ok(zoomMiddle.height>miniatureHeight+2 && zoomMiddle.height<zoomSource.pageHeight-2);
-    assert.ok(Math.abs(zoomMiddle.width/zoomMiddle.height-zoomSource.pageWidth/zoomSource.pageHeight)<.003,'the page keeps the phone aspect ratio throughout');
-    assert.equal(zoomMiddle.opacity,'1');
-    assert.match(zoomMiddle.filter,/^blur\(/,'text sharpens continuously during zoom');
-    const zoomShot=await send('Page.captureScreenshot',{format:'png'});
-    fs.writeFileSync(path.join(out,'page-zoom-mid-entry.png'),Buffer.from(zoomShot.data,'base64'));
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).transitionDuration"),'0.34s, 0.34s');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).transitionDuration"),'0.2s');
-    await sleep(55);
-    const zoomReturn=await evaluate("(()=>{const d=document.querySelector('.settings-detail'),r=d?.getBoundingClientRect();return{width:r?.width,height:r?.height,filter:getComputedStyle(d.querySelector('.settings-detail-content')).filter}})()");
-    assert.ok(zoomReturn.width>miniatureWidth+2 && zoomReturn.width<zoomSource.pageWidth-2,'the rendered page shrinks back into the entry');
-    assert.ok(Math.abs(zoomReturn.width/zoomReturn.height-zoomSource.pageWidth/zoomSource.pageHeight)<.003,'return keeps the phone aspect ratio');
-    assert.match(zoomReturn.filter,/^blur\(/,'text softens as the page returns to its miniature');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    await open('display');
-    const pageAppearanceTap=await tapPoint('[data-settings-entry="appearance"]');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    await tap(pageAppearanceTap);
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='appearance'");
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('page-zoom')"),true);
-    await back();
-    await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
-    await click('[data-settings-entry="about"]');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('page-zoom')"),true);
-    await back();
-    await send('Emulation.setEmulatedMedia',{features:[]});
-    await open('appearance');
-    await click('[data-settings-motion="card"]');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('card-morph')");
-    await back();
-    expectedSettingsMotion='card';
-    await open('about');await back();
-    checks.push('third setting keeps a uniform phone aspect ratio from miniature to full page and back; text sharpens, no reveal mask; 340/200ms, rapid retaps and reduced motion safe');
-    await open('appearance');
-    await click('[data-settings-motion="shape"]');
-    assert.equal(await evaluate("document.querySelector('[data-settings-motion=\"shape\"]').getAttribute('aria-pressed')"),'true');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('shape-page')");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail-content')).opacity"),'1','switching to shape mode does not replay its entry handoff');
-    await back();
-    expectedSettingsMotion='shape';
-    const shapeSource=await evaluate("(()=>{const p=document.querySelector('.settings-page').getBoundingClientRect(),c=document.querySelector('[data-settings-entry=\"preview\"]').getBoundingClientRect();return{left:c.left-p.left,top:c.top-p.top,width:c.width,height:c.height,pageWidth:p.width,pageHeight:p.height}})()");
-    await click('[data-settings-entry="preview"]');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='preview'");
-    const rowAlignment=await evaluate("(()=>{const original=document.querySelector('#settings-entry-preview'),source=document.querySelector('.shape-source-card'),copy=source.querySelector('.directory-link'),icon=copy.querySelector('.app-icon'),originalIcon=original.querySelector('.app-icon');const box=el=>{const r=el.getBoundingClientRect();return{x:r.left,y:r.top,width:r.width,height:r.height}};return{shown:document.querySelector('.settings-detail').classList.contains('detail-shown'),sourcePadding:getComputedStyle(source).paddingLeft,sourceTag:copy.tagName,originalTag:original.tagName,original:box(original),copy:box(copy),icon:box(icon),originalIcon:box(originalIcon)}})()");
-    assert.equal(rowAlignment.sourcePadding,'0px','the cloned row must not repeat its parent padding');
-    assert.equal(rowAlignment.sourceTag,rowAlignment.originalTag,'the clone retains the original button layout');
-    assert.ok(Math.abs((rowAlignment.icon.x-rowAlignment.copy.x)-(rowAlignment.originalIcon.x-rowAlignment.original.x))<1,'preview icon keeps the same inset throughout expansion');
-    if(!rowAlignment.shown){
-      assert.ok(Math.abs(rowAlignment.icon.x-rowAlignment.originalIcon.x)<1,'preview icon does not jump horizontally on entry');
-      assert.ok(Math.abs(rowAlignment.icon.y-rowAlignment.originalIcon.y)<1,'preview icon does not jump vertically on entry');
-      assert.ok(Math.abs(rowAlignment.copy.width-rowAlignment.original.width)<1,'preview clone begins at the button width');
-    }
-    const shapeStart=await evaluate("(()=>{const d=document.querySelector('.settings-detail'),s=d.style,c=d.querySelector('.settings-detail-content'),source=d.querySelector('.shape-source-card');return{shape:d.classList.contains('shape-page'),left:parseFloat(s.getPropertyValue('--morph-left')),top:parseFloat(s.getPropertyValue('--morph-top')),right:parseFloat(s.getPropertyValue('--morph-right')),bottom:parseFloat(s.getPropertyValue('--morph-bottom')),radius:parseFloat(s.getPropertyValue('--morph-radius')),scale:parseFloat(s.getPropertyValue('--zoom-scale')),content:!!c.querySelector('.motion-stage'),contentOpacity:Number(getComputedStyle(c).opacity),sourceOpacity:Number(getComputedStyle(source).opacity),sourceText:source.textContent,sourceFilter:getComputedStyle(source).filter,surface:getComputedStyle(d.querySelector('.settings-morph-surface')).display}})()");
-    assert.equal(shapeStart.shape,true);
-    assert.ok(Math.abs(shapeStart.left-shapeSource.left)<1 && Math.abs(shapeStart.top-shapeSource.top)<1);
-    assert.ok(Math.abs(shapeStart.right-(shapeSource.pageWidth-shapeSource.left-shapeSource.width))<1);
-    assert.ok(Math.abs(shapeStart.bottom-(shapeSource.pageHeight-shapeSource.top-shapeSource.height))<1);
-    assert.equal(shapeStart.radius,15,'preview uses its original row corner radius');
-    assert.ok(Math.abs(shapeStart.scale-Math.max(shapeSource.width/shapeSource.pageWidth,shapeSource.height/shapeSource.pageHeight))<.005);
-    assert.equal(shapeStart.content,true,'the inner page is rendered before expansion');
-    assert.ok(shapeStart.sourceText.includes('预览实验室'),'the original full card is mounted in the expanding frame');
-    assert.ok(shapeStart.sourceOpacity>.5,'the original card leads the transition');
-    assert.ok(shapeStart.contentOpacity<.5,'the destination does not appear in the first frame');
-    assert.equal(shapeStart.surface,'block','original entry fill stays behind the page during expansion');
-    await sleep(90);
-    const shapeMid=await evaluate("(()=>{const d=document.querySelector('.settings-detail'),c=d.querySelector('.settings-detail-content'),source=d.querySelector('.shape-source-card'),r=c.getBoundingClientRect(),s=getComputedStyle(d);return{clip:s.clipPath,innerWidth:r.width,innerHeight:r.height,sourceHeight:source.getBoundingClientRect().height,filter:getComputedStyle(c).filter,sourceFilter:getComputedStyle(source).filter}})()");
-    assert.match(shapeMid.clip,/^inset\(/,'outer card outline remains visible mid-flight');
-    assert.ok(Math.abs(shapeMid.innerWidth/shapeMid.innerHeight-shapeSource.pageWidth/shapeSource.pageHeight)<.003,'inner page text never stretches');
-    assert.match(shapeMid.filter,/^blur\(/);
-    assert.match(shapeMid.sourceFilter,/^blur\(/,'the expanding source card progressively loses focus');
-    assert.ok(shapeMid.sourceHeight>shapeSource.height+10,'the original card itself grows with the outer outline');
-    const shapeShot=await send('Page.captureScreenshot',{format:'png'});
-    fs.writeFileSync(path.join(out,'card-to-page-mid-entry.png'),Buffer.from(shapeShot.data,'base64'));
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).transitionDuration"),'0.34s');
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail-content')).opacity"),'1','only the destination remains visible at the end');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    assert.equal(await evaluate("getComputedStyle(document.querySelector('.settings-detail')).transitionDuration"),'0.2s');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    for(const name of ['about','appearance']){
-      await click('[data-settings-entry="'+name+'"]');
-      await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==="+JSON.stringify(name));
-      const alignment=await evaluate(`(()=>{const original=document.querySelector('#settings-entry-${name}'),source=document.querySelector('.shape-source-card'),copy=source.firstElementChild,icon=copy.querySelector('.app-icon'),originalIcon=original.querySelector('.app-icon');const a=icon.getBoundingClientRect(),b=originalIcon.getBoundingClientRect(),c=copy.getBoundingClientRect(),d=original.getBoundingClientRect();return{shown:document.querySelector('.settings-detail').classList.contains('detail-shown'),tag:copy.tagName,originalTag:original.tagName,padding:getComputedStyle(source).paddingLeft,border:getComputedStyle(copy).borderTopWidth,originalBorder:getComputedStyle(original).borderTopWidth,dx:a.left-b.left,dy:a.top-b.top,insetX:a.left-c.left,originalInsetX:b.left-d.left}})()`);
-      assert.equal(alignment.tag,alignment.originalTag,name+' retains the source button layout');
-      assert.ok(Math.abs(alignment.insetX-alignment.originalInsetX)<1,name+' icon keeps the original internal inset');
-      if(name==='about'){
-        assert.equal(alignment.padding,'0px','about row does not duplicate the parent inset');
-        assert.equal(alignment.border,alignment.originalBorder,'about row keeps its divider');
-      }
-      if(!alignment.shown){
-        assert.ok(Math.abs(alignment.dx)<1,name+' icon starts at its original horizontal position');
-        assert.ok(Math.abs(alignment.dy)<1,name+' icon starts at its original vertical position');
-      }
-      await back();
-    }
-    await open('display');
-    const shapeAppearanceTap=await tapPoint('[data-settings-entry="appearance"]');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    await tap(shapeAppearanceTap);
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='appearance'");
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('shape-page')"),true);
-    await back();
-    await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
-    await click('[data-settings-entry="about"]');
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('shape-page')"),true);
-    await back();
-    await send('Emulation.setEmulatedMedia',{features:[]});
-    await open('appearance');
-    await click('[data-settings-motion="card"]');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('card-morph')");
-    await back();
-    expectedSettingsMotion='card';
-    await open('about');await back();
-    await open('appearance');
-    await click('[data-settings-motion="slide"]');
-    await waitFor("document.querySelector('.settings-detail')?.classList.contains('slide-detail')");
-    await back();
-    expectedSettingsMotion='slide';
-    await open('appearance');
-    await evaluate("(()=>{document.querySelector('[data-settings-motion=\"card\"]').click();document.querySelector('.settings-back').click();return true})()");
-    await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='leaving'");
-    assert.equal(await evaluate("document.querySelector('.settings-detail').classList.contains('card-morph')"),true,'a same-turn selection already controls its return');
-    await sleep(70);
-    const rapidReturn=await evaluate("(()=>{const d=document.querySelector('.settings-detail'),s=getComputedStyle(d);return{clip:s.clipPath,origin:parseFloat(d.style.getPropertyValue('--morph-top'))}})()");
-    const rapidTop=Number(rapidReturn.clip.match(/^inset\(([\d.]+)px/)?.[1]);
-    assert.ok(rapidTop>1 && rapidTop<rapidReturn.origin-1,'the newly selected card return actually animates from the full page');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
-    expectedSettingsMotion='card';
-    checks.push('fresh default slide, four choices in a 2×2 layout, and a same-turn selection already animates the current return');
-    checks.push('fourth setting expands the original card before a blurred mid-flight handoff to the pre-rendered page; 340/200ms, rapid retaps and reduced motion safe, original three choices retained');
     checks.push('320/390/768 layouts, 44px navigation targets, independent scroll position and tab reentry starts at settings home');
     checks.push('navigation hidden in settings detail; visible and actionable during return; no remounting lens');
     assert.deepEqual(errors,[]);

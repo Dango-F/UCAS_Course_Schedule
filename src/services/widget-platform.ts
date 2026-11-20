@@ -22,13 +22,15 @@ export function initializeWidgetPlatform(): void {
         const state = JSON.parse(plugin.getWidgetState()) as WidgetState
         // An old APK/standard base can contain the JS screen without the native plugin.
         if (!state || typeof state.supported !== 'boolean') throw new Error('Invalid widget state')
-        if (state.supported && state.nativeVersion !== 2) return { ...state, supported: false, pinSupported: false, availability: 'native_missing' }
+        if (state.supported && state.nativeVersion !== 5) return { ...state, supported: false, pinSupported: false, availability: 'native_missing' }
         return state.supported ? state : { ...state, availability: state.availability === 'unsupported' || !state.availability ? 'native_missing' : state.availability }
       } catch { return { ...unsupportedWidgetState(), availability: 'native_missing', cacheState: 'native_missing' } }
     },
     updateWidgetOptions: async (id, options) => (await nativeCallback<{ ok: boolean }>(complete => plugin.updateWidgetOptions({ widgetId: id,
       optionsJson: JSON.stringify(options), complete }))).ok === true,
-    refreshWidgets: () => plugin.refreshWidgets(), requestPinWidget: kind => JSON.parse(plugin.requestPinWidget(kind)) as WidgetPinResult,
+    scheduleCourseRefresh: async () => (await nativeCallback<{ ok: boolean }>(complete => plugin.scheduleCourseRefresh({ complete }))).ok,
+    openCourseRefreshSettings: () => plugin.openCourseRefreshSettings(),
+    requestPinWidget: kind => JSON.parse(plugin.requestPinWidget(kind)) as WidgetPinResult,
     consumePendingAction: () => plugin.consumePendingAction(),
   })
   // #endif

@@ -69,14 +69,23 @@ async function main() {
     const optics=await import('data:text/javascript;base64,'+Buffer.from(fs.readFileSync('src/components/glass-spectrum.js','utf8')).toString('base64'));
     const maps=(depth,disperse)=>optics.SPECTRAL_SAMPLES.map(sample=>Array.from(optics.createOpticalMap(300,56,12,8,depth,disperse?sample.offset:0,true)));
     const graph=optics.spectralFilterPrimitives();
-    const results=await evaluate('('+ (async function(graph,mapSets) {
+    // Keep the former alpha calculation as a pixel reference. Compare the
+    // filter on translucent artwork as well as the opaque timetable.
+    const sumEnd='result="sum6"/>';
+    assert.ok(graph.includes(sumEnd));
+    const alphaOnly='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0';
+    let referenceGraph=graph.slice(0,graph.indexOf(sumEnd)+sumEnd.length);
+    for(let i=1;i<7;i++) referenceGraph+=`<feComposite in="${i===1?'sample0':'average'+(i-1)}" in2="sample${i}" operator="arithmetic" k2="${i/(i+1)}" k3="${1/(i+1)}" result="average${i}"/>`;
+    referenceGraph+=`<feColorMatrix in="average6" values="${alphaOnly}" result="averageAlpha"/><feColorMatrix in="sum6" values="${alphaOnly}" result="sumAlpha"/><feComposite in="sumAlpha" in2="averageAlpha" operator="arithmetic" k2="1" k3="-1" result="excessAlpha"/><feComposite in="sum6" in2="excessAlpha" operator="arithmetic" k2="1" k3="-1"/>`;
+    const mirror = Array.from(optics.createOpticalMap(300,56,12,8,true,0,true,true));
+    const results=await evaluate('('+ (async function(graph,mapSets,mirror,sharedGraph,referenceGraph) {
       const encode=p=>{
         const c=document.createElement('canvas');c.width=300;c.height=56;
         const ctx=c.getContext('2d'),d=ctx.createImageData(300,56);d.data.set(p);ctx.putImageData(d,0,0);
         return c.toDataURL();
       };
-      async function render(maps,source,filter=true) {
-        const parsed=new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="56"><defs><filter id="f" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" x="0" y="0" width="300" height="56" color-interpolation-filters="sRGB">'+graph+'</filter></defs><g'+(filter?' filter="url(#f)"':'')+'>'+source+'</g></svg>','image/svg+xml');
+      async function render(maps,source,filter=true,primitives=graph) {
+        const parsed=new DOMParser().parseFromString('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="56"><defs><filter id="f" filterUnits="userSpaceOnUse" primitiveUnits="userSpaceOnUse" x="0" y="0" width="300" height="56" color-interpolation-filters="sRGB">'+primitives+'</filter></defs><g'+(filter?' filter="url(#f)"':'')+'>'+source+'</g></svg>','image/svg+xml');
         parsed.querySelectorAll('feImage').forEach((e,i)=>{e.setAttribute('width','300');e.setAttribute('height','56');e.setAttribute('href',encode(maps[i]))});
         parsed.querySelectorAll('feDisplacementMap').forEach(e=>e.setAttribute('scale','32'));
         const img=new Image();img.src='data:image/svg+xml;base64,'+btoa(new XMLSerializer().serializeToString(parsed));await img.decode();
@@ -94,8 +103,17 @@ async function main() {
       const full=await render(mapSets[0],source),plain=await render(mapSets[1],source),noDepth=await render(mapSets[2],source);
       const difference=(a,b)=>{let sum=0,n=0;for(let y=1;y<11;y++)for(let x=35;x<265;x++)for(let k=0;k<3;k++){sum+=Math.abs(a.pixels[(y*300+x)*4+k]-b.pixels[(y*300+x)*4+k]);n++}return sum/n};
       let chroma=0;for(let y=1;y<11;y++)for(let x=35;x<265;x++){const i=(y*300+x)*4;chroma+=Math.max(...full.pixels.slice(i,i+3))-Math.min(...full.pixels.slice(i,i+3))}
-      return {solid,dispersionDifference:difference(full,plain),depthDifference:difference(full,noDepth),chroma:chroma/(230*10),images:{full:full.image,noDispersion:plain.image,noDepth:noDepth.image}};
-    }).toString()+')('+JSON.stringify(graph)+','+JSON.stringify([maps(true,true),maps(true,false),maps(false,true)])+')');
+      const stripes=Array.from({length:300},(_,x)=>
+        '<rect x="'+x+'" width="1" height="56" opacity="'+(x%256)/255+'" fill="rgb('+[x*31%256,x*67%256,x*97%256].join(',')+')"/>').join('');
+      const mirrorSource=stripes+'<circle cx="148.5" cy="5.75" r="4.5" fill="#fff"/><text x="30.25" y="13.5">Timetable</text>';
+      const reference=await render(Array(7).fill(mirror),mirrorSource,true,referenceGraph);
+      const shared=await render([mirror],mirrorSource,true,sharedGraph);
+      const mirrorChannelDifferences=shared.pixels.reduce((count,value,i)=>count+Number(value!==reference.pixels[i]),0);
+      const original=await render(mapSets[0],mirrorSource,true,referenceGraph);
+      const optimized=await render(mapSets[0],mirrorSource);
+      const spectralChannelDifferences=optimized.pixels.reduce((count,value,i)=>count+Number(value!==original.pixels[i]),0);
+      return {solid,mirrorChannelDifferences,spectralChannelDifferences,dispersionDifference:difference(full,plain),depthDifference:difference(full,noDepth),chroma:chroma/(230*10),images:{full:full.image,noDispersion:plain.image,noDepth:noDepth.image}};
+    }).toString()+')('+[graph,[maps(true,true),maps(true,false),maps(false,true)],mirror,optics.spectralFilterPrimitives(true,false,true),referenceGraph].map(value=>JSON.stringify(value)).join(',')+')');
     console.log(JSON.stringify({...results,images:undefined},null,2));
     // Canvas unpremultiplies 8-bit pixels: one premultiplied level becomes five
     // RGB levels at alpha .2. Compare in the compositing domain, not inflated RGB.
@@ -103,11 +121,13 @@ async function main() {
     assert.ok(results.dispersionDifference>2,'dispersion changes sampled colors');
     assert.ok(results.depthDifference>2,'depth changes actual sampling direction');
     assert.ok(results.chroma>3,'gray background develops spectral separation');
+    assert.equal(results.mirrorChannelDifferences,0,'reusing the outer displacement preserves every RGBA channel');
+    assert.equal(results.spectralChannelDifferences,0,'the seven distinct wavelengths preserve every translucent RGBA channel');
     for(const [name,data] of Object.entries(results.images)) fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(data.split(',')[1],'base64'));
     delete results.images;
 
     await waitFor("document.querySelector('#liquid-nav-root')?.dataset.glassRenderer==='svg-refraction'");
-    assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root feDisplacementMap').length"),14);
+    assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root feDisplacementMap').length"),8);
     await sleep(1500);
     assert.equal(await evaluate("document.querySelector('#liquid-nav-root').dataset.navIdle"),'false','default fixed navigation stays visible');
     await evaluate("document.querySelector('#liquid-nav-root [data-nav-index=\"2\"]').click()");

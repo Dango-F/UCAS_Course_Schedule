@@ -1,4 +1,4 @@
-import { chinaDate, dateAt, hasTileConflict, isSchedule, layoutTiles, teachingWeek, tilesForWeek, type CourseColor, type Schedule, type Tile } from './schedule'
+import { tileTitle, chinaDate, dateAt, hasTileConflict, isSchedule, layoutTiles, teachingWeek, tilesForWeek, type CourseColor, type Schedule, type Tile } from './schedule'
 import { tileEndTimestamp, tileStartTimestamp, tilesForDate } from './today'
 
 export type WidgetKind = 'large' | 'small'
@@ -8,6 +8,8 @@ export type WidgetAvailability = 'ready' | 'unsupported' | 'native_missing' | 'p
 export interface WidgetState {
   supported: boolean; pinSupported: boolean; revision: string; cacheState: string; instances: WidgetInstance[]
   availability?: WidgetAvailability; registeredKinds?: WidgetKind[]; packageName?: string; nativeVersion?: number
+  courseRefreshNeedsPermission?: boolean
+  nextCourseRefresh?: string
 }
 export interface WidgetPinResult { status: 'requested' | 'manual' | 'unavailable' | 'error'; reason?: string }
 export interface WidgetOccurrence {
@@ -64,7 +66,7 @@ export function buildWidgetSnapshot(schedule: Schedule | null, now = Date.now())
         startSection: tile.start, endSection: tile.end,
         startTime: schedule.periods.find(period => period.section === tile.start)!.start,
         endTime: schedule.periods.find(period => period.section === tile.end)!.end,
-        name: tile.course.name, teacher: tile.course.teacher, location: tile.meeting.location,
+        name: tileTitle(tile), teacher: tile.course.teacher, location: tile.meeting.location,
         color: tile.course.color, conflict: conflicts.has(tile.id) })
     }
   }

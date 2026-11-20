@@ -1,9 +1,9 @@
 /** Local, trusted SVG only. Never interpolate course data or remote HTML here. */
 export const loadingVariants = [
-  { id: 'original', name: '呼吸圆点', tag: '现用', description: '圆点依次呼吸，散开后描出圆环与对勾。' },
-  { id: 'arc', name: '细线旋环', tag: '方案一', description: '一笔细弧匀速流转，轻轻收成一个确认。' },
-  { id: 'ticks', name: '渐隐短线', tag: '方案二', description: '十二枚短线明暗交替，完成时只留下对勾。' },
-  { id: 'orbit', name: '双弧回环', tag: '方案三', description: '两段圆弧同向回旋，闭合后落下对勾。' },
+  { id: 'original', name: '呼吸圆点', description: '圆点依次呼吸，散开后描出圆环与对勾。' },
+  { id: 'arc', name: '细线旋环', description: '一笔细弧匀速流转，轻轻收成一个确认。' },
+  { id: 'ticks', name: '渐隐短线', description: '十二枚短线明暗交替，完成时只留下对勾。' },
+  { id: 'orbit', name: '双弧回环', description: '两段圆弧同向回旋，闭合后落下对勾。' },
 ] as const
 
 export type LoadingVariant = typeof loadingVariants[number]['id']

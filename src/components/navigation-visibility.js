@@ -45,7 +45,12 @@ export function createNavigationVisibility(root, suspend, initialMode = 'fixed')
   listen(bar,'click',()=>{if(root.dataset.navIdle!=='true') show()})
   listen(win,'blur',()=>{held=false;gesture=null;suspend();schedule()})
   listen(doc,'visibilitychange',()=>{held=false;gesture=null;if(doc.hidden){suspend();win.clearTimeout(timer)}else show()})
-  const observer=new win.MutationObserver(()=>{if(blocked()){held=false;gesture=null;suspend();win.clearTimeout(timer)}else show()})
+  const observer=new win.MutationObserver(()=>{
+    if(!blocked()) { show(); return }
+    // A sliding page can block input while part of the glass is still exposed.
+    if(held || root.dataset.navigationHidden==='true' || doc.hidden) suspend()
+    held=false;gesture=null;win.clearTimeout(timer)
+  })
   observer.observe(root,{attributes:true,attributeFilter:['inert','data-navigation-hidden']})
   show()
   return {show,configure(mode){

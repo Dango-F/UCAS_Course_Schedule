@@ -6,7 +6,7 @@ const http = require('node:http');
 const { spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const dist = path.resolve('dist/build/h5');
+const dist = path.resolve(process.env.LAKESIDE_TEST_H5_DIR || 'dist/build/h5');
 const out = path.resolve('.artifacts/swipe-ab');
 // The release has no switcher. --compare is only for an archived comparison build.
 const comparisonMode = process.argv.includes('--compare');
@@ -50,6 +50,8 @@ async function main() {
     ({ sessionId } = await send('Target.attachToTarget', { targetId, flatten: true }, false));
     await send('Runtime.enable');
     await send('Page.enable');
+    await send('Page.bringToFront');
+    await send('Emulation.setFocusEmulationEnabled', { enabled:true });
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
     const evaluate = async expression => {
@@ -64,6 +66,28 @@ async function main() {
     await send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/` });
     await waitFor(`Boolean(document.querySelector('.week-select'))`);
     const shownWeek = () => evaluate(`Number(document.querySelector('.week-select').textContent.match(/[0-9]+/)[0])`);
+    async function selectTab(index) {
+      await waitFor(`!document.querySelector('.launch-screen') && !!document.querySelector('#liquid-nav-root[data-glass-renderer] [data-nav-index="${index}"]')`);
+      await evaluate(`(() => {
+        const nav = document.querySelector('#liquid-nav-root');
+        if (nav.dataset.navIdle === 'true') nav.querySelector('.glass-wake').click();
+        nav.querySelector('[data-nav-index="${index}"]').click();
+      })()`);
+    }
+    async function openSettingsItem(section) {
+      await selectTab(2);
+      await waitFor(`Boolean(document.querySelector('.settings-page:not(.inactive-pane)'))`);
+      await evaluate(`document.querySelector('#settings-entry-${section}').click()`);
+      await waitFor(`document.querySelector('.settings-page').dataset.routePhase === 'open'`);
+    }
+    async function returnToTimetable() {
+      if (await evaluate(`Boolean(document.querySelector('.settings-detail'))`)) {
+        await evaluate(`document.querySelector('.settings-detail .settings-back').click()`);
+        await waitFor(`!document.querySelector('.settings-detail')`);
+      }
+      await selectTab(0);
+      await waitFor(`!document.querySelector('.week-select').closest('.inactive-pane')`);
+    }
     async function chooseWeek(week) {
       await evaluate(`document.querySelector('.week-select').click()`);
       await waitFor(`Boolean(document.querySelectorAll('.week-option')[${week - 1}])`);
@@ -95,10 +119,12 @@ async function main() {
     if (profileName) {
       assert.match(profileName, /^[a-z0-9-]+$/i);
       await chooseVersion(2);
-      await evaluate(`document.querySelector('[aria-label="预览设置"],[aria-label="课表设置"]').click()`);
+      if (comparisonMode) await evaluate(`document.querySelector('[aria-label="预览设置"],[aria-label="课表设置"]').click()`);
+      else await openSettingsItem('preview');
       await waitFor(`document.querySelectorAll('.scenario-option').length > 0`);
       await evaluate(`Array.from(document.querySelectorAll('.scenario-option')).find(el => el.textContent.includes('密集课表')).click()`);
-      await waitFor(`!document.querySelector('.sheet-backdrop')`);
+      if (comparisonMode) await waitFor(`!document.querySelector('.sheet-backdrop')`);
+      else await returnToTimetable();
       await chooseWeek(5);
       await send('Emulation.setCPUThrottlingRate', { rate: 4 });
       await send('Performance.enable');
@@ -158,7 +184,7 @@ async function main() {
       }
       y = await evaluate(`document.querySelector('${version === 1 ? '.calendar-carousel' : '.calendar-native'}').getBoundingClientRect().top + 120`);
       await evaluate(`window.swipeInversions = []; window.sampleSwipe = true; (function scan() {
-        const dates = Array.from(document.querySelectorAll('.day-heading')).map(el => ({ rect: el.getBoundingClientRect(), label: el.getAttribute('aria-label') })).filter(item => item.rect.left + item.rect.width / 2 > 0 && item.rect.left + item.rect.width / 2 < 390 && item.rect.width > 0).sort((a,b) => a.rect.left - b.rect.left).map(item => { const m = item.label.match(/查看 (\\d+) 月 (\\d+) 日/); return m ? Number(m[1]) * 31 + Number(m[2]) : 0 });
+        const dates = Array.from(document.querySelectorAll('.calendar-native .day-heading,.calendar-carousel .day-heading')).map(el => ({ rect: el.getBoundingClientRect(), label: el.getAttribute('aria-label') })).filter(item => item.rect.left + item.rect.width / 2 > 0 && item.rect.left + item.rect.width / 2 < 390 && item.rect.width > 0).sort((a,b) => a.rect.left - b.rect.left).map(item => { const m = item.label.match(/查看 (\\d+) 月 (\\d+) 日/); return m ? Number(m[1]) * 31 + Number(m[2]) : 0 });
         if (dates.some((date, i) => i > 0 && date <= dates[i-1])) window.swipeInversions.push(dates);
         if (window.sampleSwipe) requestAnimationFrame(scan);
       })()`);
@@ -178,14 +204,14 @@ async function main() {
           requestAnimationFrame(sample);
         }, { once: true, capture: true });
       })()`);
-      await swipe(280, 110); await sleep(450);
+      await swipe(310, 80); await sleep(450);
       if (version !== 1) {
         settleTimings[version] = await evaluate('window.measuredSettleMs');
         assert.ok(Number.isFinite(settleTimings[version]) && settleTimings[version] > 0, `v${version} release animation reached its destination`);
       }
       if (await shownWeek() !== 4) console.log(await evaluate(`({week:document.querySelector('.week-select').textContent, root:document.querySelector('#calendar-swipe-root')?.outerHTML.slice(0,1200), hit:document.elementFromPoint(280, ${y})?.outerHTML.slice(0,250)})`), errors);
       assert.equal(await shownWeek(), 4, `v${version} forward`);
-      await swipe(90, 260); await sleep(450);
+      await swipe(80, 310); await sleep(450);
       assert.equal(await shownWeek(), 3, `v${version} backward`);
       await swipe(280, 270, 4, 30); await sleep(350);
       assert.equal(await shownWeek(), 3, `v${version} small return`);
@@ -196,9 +222,9 @@ async function main() {
       // A second finger-down arrives during the preceding release animation.
       await swipe(290, 180, 4, 10); await sleep(45);
       await touch('touchStart', 280);
-      const before = await evaluate(`Array.from(document.querySelectorAll('.day-heading')).map(e => e.getBoundingClientRect().left)`);
+      const before = await evaluate(`Array.from(document.querySelectorAll('.calendar-native .day-heading,.calendar-carousel .day-heading')).map(e => e.getBoundingClientRect().left)`);
       await touch('touchMove', 230); await sleep(20);
-      const after = await evaluate(`Array.from(document.querySelectorAll('.day-heading')).map(e => e.getBoundingClientRect().left)`);
+      const after = await evaluate(`Array.from(document.querySelectorAll('.calendar-native .day-heading,.calendar-carousel .day-heading')).map(e => e.getBoundingClientRect().left)`);
       assert.ok(after.some((x, i) => Math.abs(x - before[i]) > 10), `v${version} second gesture moves while settling`);
       await touch('touchEnd'); await sleep(500);
       for (let i = 0; i < 4; i++) { await swipe(290, 90, 4, 8); await sleep(100); }
@@ -217,7 +243,7 @@ async function main() {
           const heading = await evaluate(`(() => {
             const day = document.querySelector('.week-content[data-week="${expected}"] .day-heading');
             const parts = day.getAttribute('aria-label').match(/查看 (\\d+) 月 (\\d+) 日/);
-            return { month: document.querySelector('.month-title').textContent.trim(), expectedMonth: ['一','二','三','四','五','六','七','八','九','十','十一','十二'][Number(parts[1])-1] + '月',
+            return { month: day.closest('.calendar-heading').querySelector('.axis-heading').textContent.trim(), expectedMonth: Number(parts[1]) + '月',
               range: document.querySelector('.week-range').textContent.trim(), start: Number(parts[1]) + '.' + parts[2].padStart(2, '0'),
               prepared: [...document.querySelectorAll('.calendar-native .week-content')].map(el => Number(el.dataset.week)) };
           })()`);
@@ -233,7 +259,7 @@ async function main() {
         }
         await sleep(350);
         await chooseWeek(3);
-        // Slow deliberate drag: CSS still owns release. Far-page preparation
+        // Slow deliberate drag: the compositor owns release. Far-page preparation
         // may advance, but neither of the two visible weeks may be rebuilt.
         await touch('touchStart', 310);
         for (let i = 1; i <= 16; i++) { await touch('touchMove', 310 - i * 15); await sleep(20); }
@@ -253,18 +279,18 @@ async function main() {
         })()`);
         await touch('touchEnd'); await sleep(55);
         assert.equal(await shownWeek(), 4, `v${version} slow release also updates headings without waiting for the endpoint`);
-        assert.match(await evaluate(`document.querySelector('.week-track').style.transition`), /cubic-bezier/, `v${version} uses compositor CSS settling`);
+        assert.match(await evaluate(`(()=>{const e=document.querySelector('.week-track');return e.getAnimations().find(a=>a.effect.getKeyframes().some(f=>f.transform))?.effect.getTiming().easing || e.style.transition})()`), /cubic-bezier/, `v${version} uses compositor settling`);
         await sleep(350);
         const release = await evaluate(`window.slowObserver.disconnect(); ({ ...window.slowRelease, visibleRetained: window.visibleReleasePanels.every(panel => panel.isConnected) })`);
         assert.ok(release.styleWrites <= 3, `v${version} does not write the transform every release frame`);
         assert.equal(release.visibleChanges, 0, `v${version} preserves visible course DOM while preparing distant weeks`);
-        assert.ok(release.visibleRetained, `v${version} does not replace either visible week during CSS settling`);
+        assert.ok(release.visibleRetained, `v${version} does not replace either visible week during compositor settling`);
         assert.equal(await shownWeek(), 4, `v${version} slow deliberate drag arrives at next week`);
         await touch('touchStart', 90); await touch('touchMove', 95); await sleep(120); await touch('touchEnd'); await sleep(350);
         assert.equal(await shownWeek(), 4, `v${version} tiny slow return stays on the same week`);
         const centered = await evaluate(`new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.week-track')).transform).m41`);
         assert.ok(Math.abs(centered + 3 * 390) < 1, `v${version} tiny return completely centers the track`);
-        checks.push(`v${version}: 8 forward and 8 reverse uniform rapid releases, per-release week/month/date-range updates and preload progress, CSS settling preserves visible course DOM, tiny slow return`);
+        checks.push(`v${version}: 8 forward and 8 reverse uniform rapid releases, per-release week/month/date-range updates and preload progress, compositor settling preserves visible course DOM, tiny slow return`);
       }
       // Returning to an already visited week must not reveal an old scroll offset.
       await chooseWeek(3);
@@ -301,7 +327,7 @@ async function main() {
       for (const version of [1, 2, 3, 2]) {
         await chooseVersion(version);
         await chooseWeek(3);
-        await swipe(280, 110); await sleep(400);
+        await swipe(310, 80); await sleep(400);
         assert.equal(await shownWeek(), 4, `v${version} still swipes after mode switches`);
       }
       checks.push('version three persists after reload; repeated switching among all three remains functional');
@@ -309,51 +335,45 @@ async function main() {
       for (const legacyVersion of [1, 3]) {
         // Same numeric storage encoding used by uni.setStorageSync on H5.
         await evaluate(`localStorage.setItem('lakeside:swipe-version:v2-performance', JSON.stringify({type:'number', data:${legacyVersion}}))`);
+        await evaluate('window.swipeBeforeReload = true');
         await send('Page.reload');
-        await waitFor(`Boolean(document.querySelector('#calendar-native-root'))`);
+        await waitFor(`!window.swipeBeforeReload && Boolean(document.querySelector('#calendar-native-root'))`);
         assert.equal(await evaluate(`Boolean(document.querySelector('#calendar-swipe-root, #calendar-native-v3-root'))`), false, 'legacy alternative is never mounted');
-        await evaluate(`document.querySelector('[aria-label="预览设置"],[aria-label="课表设置"]').click()`);
-        await waitFor(`Boolean(document.querySelector('.sheet-backdrop'))`);
+        await openSettingsItem('display');
         assert.equal(await evaluate(`Boolean(document.querySelector('.swipe-comparison, .swipe-version-options'))`), false, 'comparison UI is absent, not just visually hidden');
-        assert.equal(await evaluate(`document.querySelectorAll('.preference-row').length`), 4, 'teacher, assessment, section and reduced-motion settings are present');
-        await evaluate(`document.querySelector('.sheet-backdrop .close-button').click()`);
-        await waitFor(`!document.querySelector('.sheet-backdrop')`);
+        assert.equal(await evaluate(`document.querySelectorAll('.settings-detail .preference-row').length`), 3, 'teacher, assessment and section settings are present in timetable display');
+        await returnToTimetable();
         await chooseWeek(3);
-        await swipe(280, 110); await sleep(400);
+        await swipe(310, 80); await sleep(400);
         assert.equal(await shownWeek(), 4, `legacy v${legacyVersion} preference cannot override the release pager`);
       }
       await chooseWeek(3);
       await evaluate(`window.examSample = document.querySelector('.week-content[data-week="3"] .tile-exam').textContent; window.teacherCount = document.querySelectorAll('.tile-teacher').length`);
-      await evaluate(`document.querySelector('[aria-label="预览设置"],[aria-label="课表设置"]').click()`);
-      await waitFor(`Boolean(document.querySelector('[aria-label="展示考核方式"]'))`);
+      await openSettingsItem('display');
       assert.equal(await evaluate(`document.querySelector('[aria-label="展示考核方式"]').getAttribute('aria-checked')`), 'true', 'assessments are shown by default');
       await evaluate(`document.querySelector('[aria-label="展示考核方式"]').click()`);
       await waitFor(`!document.querySelector('.tile-exam')`);
       assert.equal(await evaluate(`document.querySelector('[aria-label="展示考核方式"]').getAttribute('aria-checked')`), 'false', 'assessment switch reflects the hidden state');
       assert.equal(await evaluate(`document.querySelectorAll('.tile-teacher').length === window.teacherCount`), true, 'hiding assessments leaves teacher display unchanged');
       assert.equal(await evaluate(`[...document.querySelectorAll('.course-tile')].some(card => card.getAttribute('aria-label').includes(window.examSample))`), false, 'hidden assessment is also omitted from card accessibility labels');
-      await evaluate(`document.querySelector('.sheet-backdrop .close-button').click()`);
-      await waitFor(`!document.querySelector('.sheet-backdrop')`);
+      await returnToTimetable();
       await chooseWeek(4);
       assert.equal(await evaluate(`document.querySelectorAll('.tile-exam').length`), 0, 'assessment preference also applies to newly loaded weeks');
       await chooseWeek(3);
       await evaluate(`document.querySelector('.week-content[data-week="3"] .course-tile').click()`);
       await waitFor(`Boolean(document.querySelector('.detail-title'))`);
-      assert.equal(await evaluate(`document.querySelector('.detail-info').textContent.includes(window.examSample)`), true, 'full course details retain assessment information');
+      assert.equal(await evaluate(`document.querySelector('.course-detail').textContent.includes(window.examSample)`), true, 'full course details retain assessment information');
       await evaluate(`document.querySelector('.sheet-backdrop .close-button').click()`);
       await waitFor(`!document.querySelector('.sheet-backdrop')`);
       await evaluate(`document.querySelector('.week-content[data-week="3"] .day-heading').click()`);
-      await waitFor(`Boolean(document.querySelector('.today-heading'))`);
-      await evaluate(`document.querySelector('.sheet-backdrop .close-button').click()`);
-      await waitFor(`!document.querySelector('.sheet-backdrop')`);
+      await waitFor(`Boolean(document.querySelector('.today-page .date-title'))`);
+      await returnToTimetable();
       checks.push('release ignores saved v1/v3 choices; settings have no comparison UI; course details and day views still work');
-      await evaluate(`document.querySelector('[aria-label="预览设置"],[aria-label="课表设置"]').click()`);
-      await waitFor(`Boolean(document.querySelector('[aria-label="展示考核方式"]'))`);
+      await openSettingsItem('display');
       await evaluate(`document.querySelector('[aria-label="展示考核方式"]').click()`);
       await waitFor(`Boolean(document.querySelector('.week-content[data-week="3"] .tile-exam'))`);
       assert.equal(await evaluate(`document.querySelector('.week-content[data-week="3"] .tile-exam').textContent === window.examSample`), true, 'turning assessment display back on restores its original text');
-      await evaluate(`document.querySelector('.sheet-backdrop .close-button').click()`);
-      await waitFor(`!document.querySelector('.sheet-backdrop')`);
+      await returnToTimetable();
       checks.push('assessment display: default on, live toggle, accessibility labels, newly loaded weeks, details preserved and display restored');
     }
     assert.deepEqual(errors, []);

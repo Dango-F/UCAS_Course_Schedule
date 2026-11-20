@@ -28,4 +28,40 @@ describe('Kyant seven-sample optics',()=>{
       for(let i=3;i<p.length;i+=4) expect(p[i]).toBe(255)
     }
   })
+  it('can reuse a mirrored PNG while retaining all distinct selector PNGs',()=>{
+    for(const [width,height] of [[63,31],[100,48]]){
+      const mirror=createOpticalMap(width,height,9,6.5,true,0,true,true)
+      for(const {offset} of SPECTRAL_SAMPLES){
+        const ray=createOpticalMap(width,height,9,6.5,true,offset,true,true)
+        expect(Buffer.from(ray).equals(Buffer.from(mirror))).toBe(true)
+      }
+      const selector=SPECTRAL_SAMPLES.map(({offset})=>Buffer.from(createOpticalMap(width,height,9,6.5,true,offset,true,false,2,true,.5)))
+      expect(selector.every((ray,i)=>selector.slice(0,i).every(previous=>!previous.equals(ray)))).toBe(true)
+    }
+  })
+  it('reconstructs each full-resolution wavelength when interrupted between raster rows', () => {
+    for (const {offset} of SPECTRAL_SAMPLES) {
+      const args = [37, 19, 4.5, 3.25, true, offset, true, false, 3, true, 1 / 2.75] as const
+      const expected = createOpticalMap(...args)
+      const pixels = new Uint8ClampedArray(expected.length)
+      const rows = 19 * 3
+      for (let from = 0; from < rows; from += 4) {
+        createOpticalMap(...args, { pixels, from, to: Math.min(rows, from + 4) })
+      }
+      expect(Buffer.from(pixels).equals(Buffer.from(expected))).toBe(true)
+    }
+  })
+  it('shares only the coincident outer displacement across the seven colour weights',()=>{
+    const outer = spectralFilterPrimitives(true, false, true)
+    expect(outer.match(/<feDisplacementMap /g)).toHaveLength(1)
+    expect(outer.match(/<feColorMatrix in="sample0" type="matrix"/g)).toHaveLength(7)
+    expect(outer).not.toMatch(/"sample[1-6]"/)
+    expect(spectralFilterPrimitives(true, true).match(/<feDisplacementMap /g)).toHaveLength(7)
+  })
+  it('refracts the original artwork once per wavelength without a blur or a second shifted copy',()=>{
+    const graph = spectralFilterPrimitives()
+    expect(graph).not.toContain('feGaussianBlur')
+    expect(graph.match(/<feDisplacementMap in="SourceGraphic"/g)).toHaveLength(7)
+    expect(graph).not.toContain('rimCoverage')
+  })
 })

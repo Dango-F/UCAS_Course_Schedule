@@ -73,14 +73,14 @@ async function jumpTo(id: string) {
 }
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 .glass-test-page { --lab-sample-height:calc(100vh - 116px - var(--status-bar-height,0px)); --lab-sample-height:calc(100dvh - 116px - var(--status-bar-height,0px)); flex:1; height:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:#fff; }
 .lab-header { flex-shrink:0; padding:calc(var(--status-bar-height,0px) + 18px) 22px 10px; border-bottom:1px solid #e8edf3; background:#fff; }
 .lab-heading { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
 .lab-title { color:#203047; font-size:22px; font-weight:650; letter-spacing:-.5px; }
 .lab-hint { font-size:10px; color:#788b9e; text-align:right; line-height:1.5; }
 .lab-shortcuts { display:flex; gap:6px; margin-top:10px; }
-.lab-shortcuts button { flex:1; min-width:0; min-height:44px; border-radius:12px; color:#456a8b; background:#f1f5f9; font-size:12px; font-weight:550; }
+.lab-shortcuts button { flex:1; min-width:0; min-height:44px; border-bottom:1px solid #e2eaf2; color:#426b8e; font-size:12px; font-weight:650; }
 .lab-scroll { flex:1; min-height:0; height:0; }
 .lab-panel { padding:24px 26px; }
 .panel-heading { display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; font-weight:550; }
@@ -90,24 +90,30 @@ async function jumpTo(id: string) {
 .lab-light { min-height:620px; min-height:max(380px,var(--lab-sample-height)); color:#25374a; background:#fff; }
 .light-swatches { display:flex; gap:12px; margin:25px 0 22px; }
 .light-swatches view { flex:1; height:38px; border-radius:9px; background:#dae8f5; }
-.light-swatches view:nth-child(2) { background:#dcefe8; }.light-swatches view:nth-child(3) { background:#eae3f3; }
+.light-swatches view:nth-child(2) { background:#dcefe8; }
+.light-swatches view:nth-child(3) { background:#eae3f3; }
 .type-lines { display:flex; flex-direction:column; gap:11px; font-size:13px; line-height:1.5; }
-.type-lines text:nth-child(2) { font-size:12px; letter-spacing:2px; }.type-lines text:last-child { font-size:11px; font-variant-numeric:tabular-nums; opacity:.7; }
+.type-lines text:nth-child(2) { font-size:12px; letter-spacing:2px; }
+.type-lines text:last-child { font-size:11px; font-variant-numeric:tabular-nums; opacity:.7; }
 .lab-dark { min-height:620px; min-height:max(380px,var(--lab-sample-height)); color:#edf4fb; background:#132133; }
 .orbit-mark { position:relative; width:152px; height:84px; margin:20px 0 24px; }
 .orbit-mark view { position:absolute; top:8px; width:70px; height:70px; border:1px solid #7997b8; border-radius:50%; }
-.orbit-mark view:nth-child(2) { left:40px; border-color:#a1b9d0; }.orbit-mark view:nth-child(3) { left:80px; border-color:#c2d6e8; }
+.orbit-mark view:nth-child(2) { left:40px; border-color:#a1b9d0; }
+.orbit-mark view:nth-child(3) { left:80px; border-color:#c2d6e8; }
 .lab-mixed { display:flex; height:620px; height:max(380px,var(--lab-sample-height)); }
 .mixed-light,.mixed-dark { display:flex; flex:1; min-width:0; flex-direction:column; justify-content:space-between; padding:24px 26px; }
-.mixed-light { color:#203047; background:#f6f8fc; }.mixed-dark { color:#edf4fb; background:#152234; }
-.mixed-label { font-size:11px; }.mixed-title { font-size:70px; line-height:1.1; font-weight:450; }
+.mixed-light { color:#203047; background:#f6f8fc; }
+.mixed-dark { color:#edf4fb; background:#152234; }
+.mixed-label { font-size:11px; }
+.mixed-title { font-size:70px; line-height:1.1; font-weight:450; }
 .mixed-light > text:last-child,.mixed-dark > text:last-child { font-size:12px; line-height:1.9; letter-spacing:1px; }
 .photo-group { background:#fff; }
 .photo-caption { display:flex; justify-content:space-between; padding:18px 26px; color:#203047; background:#f6f8fc; font-size:12px; font-weight:550; }
 .photo-caption text:last-child { font-size:11px; font-weight:400; opacity:.7; }
 .caption-dark { color:#edf4fb; background:#111d2a; }
 .photo-frame { position:relative; height:620px; height:max(410px,var(--lab-sample-height)); overflow:hidden; }
-.photo-day { background:#edf1f7; }.photo-night { background:#111d2a; }
+.photo-day { background:#edf1f7; }
+.photo-night { background:#111d2a; }
 .lab-photo { display:block; width:100%; height:100%; }
 .photo-error { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:13px; color:#748aa2; }
 .photo-credit { padding:12px 26px; color:#7f8d9c; background:#f6f8fc; font-size:9px; line-height:1.6; }
@@ -115,13 +121,14 @@ async function jumpTo(id: string) {
 .type-display { display:block; margin-top:28px; font-size:94px; line-height:1.15; font-weight:650; letter-spacing:-5px; }
 .type-medium { display:block; margin:14px 0 24px; font-size:22px; font-weight:550; }
 .ruler-lines { display:flex; flex-direction:column; gap:9px; margin-bottom:24px; }
-.ruler-lines view { height:1px; background:#9db4c7; }.ruler-lines view:nth-child(even) { height:2px; background:#577b98; }
+.ruler-lines view { height:1px; background:#9db4c7; }
+.ruler-lines view:nth-child(even) { height:2px; background:#577b98; }
 .type-small { display:block; font-size:11px; line-height:1.8; color:#647e93; }
 .type-alphabet { display:block; margin-top:22px; font-size:24px; letter-spacing:1px; }
 .type-digits { display:block; margin-top:18px; font-size:17px; font-variant-numeric:tabular-nums; }
 .dense-type { display:flex; flex-direction:column; gap:7px; margin-top:22px; font-size:12px; white-space:nowrap; overflow:hidden; }
 .lab-end { display:flex; align-items:center; justify-content:space-between; gap:16px; min-height:210px; padding:24px 26px calc(100px + env(safe-area-inset-bottom,0px)); color:#768b9f; background:#fff; font-size:12px; }
-.lab-end button { width:44px; min-height:44px; border:1px solid #dfe8f0; border-radius:50%; color:#456a8b; font-size:20px; }
+.lab-end button { width:44px; min-height:44px; color:#426b8e; font-size:20px; }
 @media (max-width:374px) {
   .lab-header { padding-left:16px; padding-right:16px; }.lab-title { font-size:20px; }.lab-hint { max-width:140px; }
   .lab-panel,.mixed-light,.mixed-dark { padding-left:22px; padding-right:22px; }.specimen-title { font-size:29px; }

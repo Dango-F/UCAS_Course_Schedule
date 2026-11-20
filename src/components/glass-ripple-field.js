@@ -109,16 +109,6 @@ export function flowEntryOffset(wave,now,width,height) {
   if(!remaining)return {x:0,y:0}
   return {x:-width*.62*remaining,y:height*.60*remaining}
 }
-function sampleFlow(field,width,height,x,y,channel) {
-  const left=Math.floor(x),top=Math.floor(y),dx=x-left,dy=y-top
-  let value=0
-  for(let row=0;row<2;row++)for(let col=0;col<2;col++){
-    const sx=left+col,sy=top+row
-    if(sx>=0&&sx<width&&sy>=0&&sy<height)
-      value+=field[(sy*width+sx)*2+channel]*(col?dx:1-dx)*(row?dy:1-dy)
-  }
-  return value
-}
 // One very broad open ribbon, not a bundle of narrow stripes. Its phase follows
 // bottom-left -> top-right diagonal, independent of touch direction.
 const RIBBONS=[
@@ -137,10 +127,38 @@ export function ribbonColumn(index,x,age) {
     strength:ribbon.strength*(.78+.22*Math.cos(phase*.61+index*.9))
   }
 }
+
+// Samples of exp(-z²) at a uniform spacing form a sequence whose successive
+// ratios have a constant ratio. Re-seed every 16 rows to bound roundoff.
+function seedGaussian(sequence, index, z, step) {
+  sequence[index] = Math.exp(-z*z)
+  sequence[index+1] = Math.exp(-2*z*step-step*step)
+  sequence[index+2] = Math.exp(-2*step*step)
+}
+function nextGaussian(sequence, index) {
+  const value = sequence[index]
+  sequence[index] *= sequence[index+1]
+  sequence[index+1] *= sequence[index+2]
+  return value
+}
+
 function paintFlowField(pixels,width,height,wave,now) {
+  const stride=(width+2)*2
   let buffers=flowBuffers.get(pixels)
-  if(!buffers){buffers={field:new Float32Array(width*height*2),columns:new Float32Array(width*FLOW_RIBBON_COUNT*3)};flowBuffers.set(pixels,buffers)}
-  const {field,columns}=buffers
+  if(!buffers||buffers.width!==width||buffers.height!==height){
+    const rowY=Float64Array.from({length:height},(_,row)=>(row+.5)/height-.5)
+    buffers={
+      width,height,rowY,
+      feather:rowY.map(y=>smooth(Math.min(1,(.5-Math.abs(y))/.10))),
+      // A one-pixel transparent border supplies all four bilinear taps at the rim.
+      field:new Float32Array(stride*(height+2)),
+      columns:new Float32Array(width*FLOW_RIBBON_COUNT*3),
+      gaussian:new Float64Array(width*FLOW_RIBBON_COUNT*6),
+      sampleX:new Int32Array(width),weightX:new Float64Array(width)
+    }
+    flowBuffers.set(pixels,buffers)
+  }
+  const {field,columns,gaussian,sampleX,weightX}=buffers
   const age=Math.max(0,wave.flowAge??(now-wave.born))
   const entry=flowEntryOffset(wave,now,width,height)
   const entering=age<FLOW_ENTRY_DURATION
@@ -151,20 +169,36 @@ function paintFlowField(pixels,width,height,wave,now) {
       columns[j]=ribbon.center;columns[j+1]=ribbon.width;columns[j+2]=ribbon.strength
     }
   }
-  let lightSum=0,shadeSum=0,index=0
+  let lightSum=0,shadeSum=0
   for(let row=0;row<height;row++){
-    const y=(row+.5)/height-.5
-    const feather=smooth(Math.min(1,(.5-Math.abs(y))/.10))
+    const y=buffers.rowY[row],feather=buffers.feather[row]
+    let index=(row+1)*stride+2
     for(let col=0;col<width;col++,index+=2){
       let light=0,shade=0
       for(let band=0;band<FLOW_RIBBON_COUNT;band++){
         const j=(col*FLOW_RIBBON_COUNT+band)*3,center=columns[j],spread=columns[j+1]*FLOW_BAND_WIDTH,strength=columns[j+2]
-        light+=strength*Math.exp(-Math.pow((y-center)/spread,2))
-        // One soft shoulder belonging to the same broad reflection, not a
-        // second separate narrow line.
-        shade+=strength*Math.exp(-Math.pow((y-center-spread*.85)/(spread*.90),2))
+        const k=j*2
+        if ((row & 15)===0) {
+          seedGaussian(gaussian,k,(y-center)/spread,1/(height*spread))
+          seedGaussian(gaussian,k+3,(y-center-spread*.85)/(spread*.90),1/(height*spread*.90))
+        }
+        light+=strength*nextGaussian(gaussian,k)
+        shade+=strength*nextGaussian(gaussian,k+3)
       }
-      field[index]=light*feather;field[index+1]=shade*feather
+      light*=feather; shade*=feather
+      // The field is Float32. If accumulated double-precision roundoff could
+      // cross a rounding midpoint, evaluate that pixel directly.
+      if (Math.fround(light*(1-1e-11))!==Math.fround(light*(1+1e-11)) ||
+          Math.fround(shade*(1-1e-11))!==Math.fround(shade*(1+1e-11))) {
+        light=0; shade=0
+        for (let band=0;band<FLOW_RIBBON_COUNT;band++) {
+          const j=(col*FLOW_RIBBON_COUNT+band)*3,center=columns[j],spread=columns[j+1]*FLOW_BAND_WIDTH,strength=columns[j+2]
+          light+=strength*Math.exp(-Math.pow((y-center)/spread,2))
+          shade+=strength*Math.exp(-Math.pow((y-center-spread*.85)/(spread*.90),2))
+        }
+        light*=feather; shade*=feather
+      }
+      field[index]=light;field[index+1]=shade
       lightSum+=field[index];shadeSum+=field[index+1]
     }
   }
@@ -178,17 +212,37 @@ function paintFlowField(pixels,width,height,wave,now) {
   const widthEnergy=FLOW_BAND_WIDTH/1.06
   const lightScale=width*height*.19*widthEnergy/Math.max(lightSum,1)*envelope
   const shadeScale=width*height*.135*widthEnergy/Math.max(shadeSum,1)*envelope
-  for(let i=0,j=0;i<pixels.length;i+=4,j+=2){
-    const x=(i/4)%width-entry.x,y=Math.floor(i/4/width)-entry.y
-    const white=(entering?sampleFlow(field,width,height,x,y,0):field[j])*lightScale
-    const grey=(entering?sampleFlow(field,width,height,x,y,1):field[j+1])*shadeScale
-    // Add premultiplied contributions, keeping their total below one. No
-    // destructive light/shadow cancellation and no grey underneath white.
-    const alpha=white+grey
-    pixels[i]=alpha?(255*white+82*grey)/alpha:0
-    pixels[i+1]=alpha?(255*white+90*grey)/alpha:0
-    pixels[i+2]=alpha?(255*white+100*grey)/alpha:0
-    pixels[i+3]=Math.round(255*alpha)
+  const firstX=Math.max(0,Math.floor(entry.x)), endX=Math.min(width,Math.ceil(width+entry.x))
+  const firstY=Math.max(0,Math.floor(entry.y)), endY=Math.min(height,Math.ceil(height+entry.y))
+  if(entering){
+    pixels.fill(0)
+    for(let x=firstX;x<endX;x++){
+      const sample=x-entry.x,left=Math.floor(sample)
+      sampleX[x]=(left+1)*2
+      weightX[x]=sample-left
+    }
+  }
+  for(let y=firstY;y<endY;y++){
+    const sample=y-entry.y,top=Math.floor(sample),dy=sample-top
+    const line=(top+1)*stride
+    let i=(y*width+firstX)*4
+    for(let x=firstX;x<endX;x++,i+=4){
+      let light,shade
+      if(entering){
+        const j=line+sampleX[x],k=j+stride,dx=weightX[x]
+        // Preserve the four products and their order, including at fractional coordinates.
+        light=field[j]*(1-dx)*(1-dy)+field[j+2]*dx*(1-dy)+field[k]*(1-dx)*dy+field[k+2]*dx*dy
+        shade=field[j+1]*(1-dx)*(1-dy)+field[j+3]*dx*(1-dy)+field[k+1]*(1-dx)*dy+field[k+3]*dx*dy
+      }else{
+        const j=line+(x+1)*2
+        light=field[j];shade=field[j+1]
+      }
+      const white=light*lightScale,grey=shade*shadeScale,alpha=white+grey
+      pixels[i]=alpha?(255*white+82*grey)/alpha:0
+      pixels[i+1]=alpha?(255*white+90*grey)/alpha:0
+      pixels[i+2]=alpha?(255*white+100*grey)/alpha:0
+      pixels[i+3]=Math.round(255*alpha)
+    }
   }
   return 1
 }
@@ -200,13 +254,17 @@ export function blendRipplePixels(output,target,memory,dt) {
   let visible=false
   for(let i=0;i<target.length;i+=4){
     const a=target[i+3]/255
-    for(let c=0;c<3;c++)memory[i+c]+=(target[i+c]*a-memory[i+c])*blend
+    memory[i]+=(target[i]*a-memory[i])*blend
+    memory[i+1]+=(target[i+1]*a-memory[i+1])*blend
+    memory[i+2]+=(target[i+2]*a-memory[i+2])*blend
     memory[i+3]+=(a-memory[i+3])*blend
     const alpha=memory[i+3]
     output[i+3]=Math.round(alpha*255)
     if(output[i+3]){
       visible=true
-      for(let c=0;c<3;c++)output[i+c]=Math.round(memory[i+c]/alpha)
+      output[i]=Math.round(memory[i]/alpha)
+      output[i+1]=Math.round(memory[i+1]/alpha)
+      output[i+2]=Math.round(memory[i+2]/alpha)
     }else output[i]=output[i+1]=output[i+2]=0
   }
   return visible

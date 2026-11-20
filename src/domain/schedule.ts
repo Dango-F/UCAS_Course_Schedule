@@ -1,10 +1,18 @@
 export type CourseColor = 'blue' | 'teal' | 'purple' | 'apricot'
-export interface Course { id: string; name: string; code?: string; teacher: string; isDegreeCourse?: boolean; exam?: string; color: CourseColor; origin: 'demo' | 'manual' | 'ucas'; edited?: boolean }
-export interface Meeting { id: string; courseId: string; day: number; sections: number[]; weeks: number[]; location: string }
+export interface Course { id: string; name: string; code?: string; teacher: string; isDegreeCourse?: boolean; exam?: string; credits?: number; color: CourseColor; origin: 'demo' | 'manual' | 'ucas'; edited?: boolean }
+export const meetingKindLabels = { makeup: '补课', temporary: '临时课程', meeting: '会议', activity: '活动' } as const
+export type MeetingKind = keyof typeof meetingKindLabels
+export interface Meeting { id: string; courseId: string; day: number; sections: number[]; weeks: number[]; location: string; teacher?: string; note?: string; kind?: MeetingKind }
 export interface Period { section: number; start: string; end: string }
 export interface Semester { id: string; name: string; monday: string; weeks: number; campus: string; confirmed: boolean }
 export interface Schedule { version: 1; semester: Semester; courses: Course[]; meetings: Meeting[]; periods: Period[]; importedAt?: string }
 export interface Tile { id: string; meeting: Meeting; course: Course; start: number; end: number }
+
+export const MAX_TEACHING_WEEKS = 30
+
+export function tileTitle(tile: Tile): string {
+  return tile.meeting.kind ? `${tile.course.name} · ${meetingKindLabels[tile.meeting.kind]}` : tile.course.name
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value) }
 function positiveNumbers(value: unknown, max: number): value is number[] { return Array.isArray(value) && value.length > 0 && value.every(item => typeof item === 'number' && Number.isInteger(item) && item >= 1 && item <= max) }
@@ -14,15 +22,18 @@ export function isSchedule(value: unknown): value is Schedule {
   if (!isRecord(value) || value.version !== 1 || !isRecord(value.semester) || !Array.isArray(value.courses) || !Array.isArray(value.meetings) || !Array.isArray(value.periods)) return false
   const semester = value.semester
   if (typeof semester.id !== 'string' || typeof semester.name !== 'string' || typeof semester.monday !== 'string' || typeof semester.weeks !== 'number' || typeof semester.campus !== 'string' || typeof semester.confirmed !== 'boolean') return false
-  if (!Number.isInteger(semester.weeks) || semester.weeks < 1 || semester.weeks > 30) return false
+  if (!Number.isInteger(semester.weeks) || semester.weeks < 1 || semester.weeks > MAX_TEACHING_WEEKS) return false
   const courseIds = new Set<string>()
   for (const course of value.courses) {
     if (!isRecord(course) || typeof course.id !== 'string' || !course.id || typeof course.name !== 'string' || (course.code !== undefined && typeof course.code !== 'string') || typeof course.teacher !== 'string' || (course.isDegreeCourse !== undefined && typeof course.isDegreeCourse !== 'boolean') || (course.exam !== undefined && typeof course.exam !== 'string') || !['blue', 'teal', 'purple', 'apricot'].includes(String(course.color)) || !['demo', 'manual', 'ucas'].includes(String(course.origin))) return false
+    if (course.credits !== undefined && (typeof course.credits !== 'number' || !Number.isFinite(course.credits) || course.credits < 0 || course.credits > 100)) return false
     if (courseIds.has(course.id)) return false
     courseIds.add(course.id)
   }
   for (const meeting of value.meetings) {
-    if (!isRecord(meeting) || typeof meeting.id !== 'string' || !courseIds.has(String(meeting.courseId)) || typeof meeting.day !== 'number' || !Number.isInteger(meeting.day) || meeting.day < 1 || meeting.day > 7 || !positiveNumbers(meeting.sections, 20) || !positiveNumbers(meeting.weeks, 30) || typeof meeting.location !== 'string') return false
+    if (!isRecord(meeting) || typeof meeting.id !== 'string' || !courseIds.has(String(meeting.courseId)) || typeof meeting.day !== 'number' || !Number.isInteger(meeting.day) || meeting.day < 1 || meeting.day > 7 || !positiveNumbers(meeting.sections, 20) || !positiveNumbers(meeting.weeks, MAX_TEACHING_WEEKS) || typeof meeting.location !== 'string') return false
+    if ((meeting.teacher !== undefined && typeof meeting.teacher !== 'string') || (meeting.note !== undefined && typeof meeting.note !== 'string')) return false
+    if (meeting.kind !== undefined && !Object.prototype.hasOwnProperty.call(meetingKindLabels, String(meeting.kind))) return false
   }
   return value.periods.every(period => isRecord(period) && typeof period.section === 'number' && Number.isInteger(period.section) && period.section >= 1 && typeof period.start === 'string' && typeof period.end === 'string')
 }
@@ -44,15 +55,31 @@ export function parseNumbers(value: string, max: number): number[] {
   if (!numbers.size) throw new Error('没有有效的周次或节次')
   return [...numbers].sort((a, b) => a - b)
 }
-export function compactNumbers(values: number[]) {
+export function numberRanges(values: number[]): [start: number, end: number][] {
   const sorted = [...new Set(values)].sort((a, b) => a - b)
-  const result: string[] = []
+  const result: [number, number][] = []
   for (let i = 0; i < sorted.length; i++) {
     const start = sorted[i]; let end = start
     while (i + 1 < sorted.length && sorted[i + 1] === end + 1) end = sorted[++i]
-    result.push(start === end ? `${start}` : `${start}–${end}`)
+    result.push([start, end])
   }
-  return result.join('、')
+  return result
+}
+export function compactNumbers(values: number[]) { return numberRanges(values).map(([start, end]) => start === end ? `${start}` : `${start}–${end}`).join('、') }
+
+export function meetingTimeLabel(periods: Period[], sections: number[]): string {
+  return numberRanges(sections).map(([start, end]) => {
+    const from = periods.find(period => period.section === start)?.start
+    const to = periods.find(period => period.section === end)?.end
+    return from && to ? `${from}–${to}` : '时间待确认'
+  }).join(' · ')
+}
+export function isMonday(value: string): boolean {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return false
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3])
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day && date.getUTCDay() === 1
 }
 export function dateAt(monday: string, week: number, day: number) {
   const date = new Date(`${monday}T12:00:00+08:00`)
@@ -65,11 +92,11 @@ export function tilesForWeek(schedule: Schedule, week: number): Tile[] {
   for (const meeting of schedule.meetings.filter(m => m.weeks.includes(week))) {
     const course = schedule.courses.find(c => c.id === meeting.courseId)
     if (!course) continue
-    const sections = [...new Set(meeting.sections)].sort((a, b) => a - b)
-    for (let i = 0; i < sections.length; i++) {
-      const start = sections[i]; let end = start
-      while (i + 1 < sections.length && sections[i + 1] === end + 1) end = sections[++i]
-      tiles.push({ id: `${meeting.id}-${start}`, meeting, course, start, end })
+    // Keep the default on the stored course and resolve the per-meeting
+    // teacher in the shared view data used by the calendar, today and widgets.
+    const displayedCourse = meeting.teacher ? { ...course, teacher: meeting.teacher } : course
+    for (const [start, end] of numberRanges(meeting.sections)) {
+      tiles.push({ id: `${meeting.id}-${start}`, meeting, course: displayedCourse, start, end })
     }
   }
   return tiles

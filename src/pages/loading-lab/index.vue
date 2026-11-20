@@ -18,19 +18,20 @@
             <text class="lab-status-title">{{ complete ? '读取完成' : '正在读取课程信息' }}</text>
             <text class="lab-status-note">{{ complete ? '课程已就绪，接下来核对课表' : '请稍候，正在整理本学期的安排' }}</text>
           </view>
-          <view class="stage-meta"><text>{{ current.tag }} · {{ current.name }}</text><text>{{ quiet ? '减少动态' : slow ? '0.5× 慢放' : '1× 原速' }}</text></view>
+          <view class="stage-meta"><text>{{ quiet ? '减少动态' : slow ? '0.5× 慢放' : '1× 原速' }}</text></view>
         </view>
 
         <view class="variant-picker" role="group" aria-label="选择加载动画">
           <button v-for="item in loadingVariants" :key="item.id" class="variant-option" :class="{ selected: selected === item.id }"
-            :aria-pressed="selected === item.id" :aria-label="item.tag + '：' + item.name" @click="selectVariant(item.id)">
-            <view class="variant-caption"><text>{{ item.tag }}</text><view class="selection-dot" /></view><text class="variant-name">{{ item.name }}</text>
+            :aria-pressed="selected === item.id" :aria-label="item.name" @click="selectVariant(item.id)">
+            <text class="variant-name">{{ item.name }}</text>
+            <AppIcon v-if="selected === item.id" name="check" :size="17" color="#426b8e" />
           </button>
         </view>
         <text class="variant-description">{{ current.description }}</text>
 
         <view class="lab-actions">
-          <button class="demo-button" @click="playDemo">{{ demoRunning ? '重新演示' : '完整演示' }}<AppIcon name="arrow" :size="17" color="#ffffff" /></button>
+          <button class="demo-button" @click="playDemo">{{ demoRunning ? '重新演示' : '完整演示' }}</button>
           <button class="finish-button" @click="complete ? restart() : finish()">{{ complete ? '重新转圈' : '立即完成' }}</button>
         </view>
         <text class="demo-hint">完整演示：读取 3 秒，再播放完成动画。</text>
@@ -85,7 +86,7 @@ onShow(() => { visible.value = true })
 onUnmounted(cancelDemo)
 </script>
 
-<style scoped>
+<style scoped lang="scss">
 /* Apple-inspired restraint: porcelain, graphite, system typography. Motion is
    the focal point; no decorative gradients, glass cards or downloaded fonts. */
 .motion-lab { --lab-paper:#f5f5f7; --lab-ink:#1d1d1f; --lab-secondary:#6e6e73; --lab-line:#e5e5ea; --lab-accent:#007aff; display:flex; flex-direction:column; height:100vh; height:100dvh; max-width:560px; margin:0 auto; color:var(--lab-ink); background:var(--lab-paper); font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI','PingFang SC','Microsoft YaHei',sans-serif; }
@@ -101,24 +102,35 @@ onUnmounted(cancelDemo)
 .lab-status { position:relative; display:flex; flex-direction:column; align-items:center; margin-top:-18px; }
 .lab-status-title { margin-top:2px; font-size:13px; font-weight:500; }
 .lab-status-note { margin-top:7px; font-size:10px; color:var(--lab-secondary); }
-.stage-meta { position:absolute; bottom:18px; left:20px; right:20px; display:flex; justify-content:space-between; font-size:10px; color:var(--lab-secondary); font-variant-numeric:tabular-nums; }
+.stage-meta { position:absolute; bottom:18px; right:20px; font-size:10px; color:var(--lab-secondary); font-variant-numeric:tabular-nums; }
 .lab-context { position:absolute; inset:0; padding:20px; opacity:.2; filter:blur(2.5px); pointer-events:none; }
-.context-title { font-size:12px; }.context-rule { height:1px; background:#a5adb9; margin:12px 0; }
-.context-row { display:flex; height:39px; gap:10px; margin-top:8px; }.context-row view { flex:1; background:#cad9e3; border-radius:4px; }.context-row:nth-child(odd) view:nth-child(2) { background:transparent; }
+.context-title { font-size:12px; }
+.context-rule { height:1px; background:#a5adb9; margin:12px 0; }
+.context-row { display:flex; height:39px; gap:10px; margin-top:8px; }
+.context-row view { flex:1; background:#cad9e3; border-radius:4px; }
+.context-row:nth-child(odd) view:nth-child(2) { background:transparent; }
 .with-context .lab-status { padding:0 12px 14px; border-radius:20px; background:rgba(255,255,255,.86); }
-.variant-picker { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:9px; margin-top:20px; }
-.variant-option { padding:12px 14px; border:1px solid var(--lab-line); border-radius:14px; text-align:left; background:rgba(255,255,255,.4); }
-.variant-option.selected { background:#fff; border-color:var(--lab-ink); box-shadow:inset 0 0 0 .5px var(--lab-ink); }
-.variant-caption { display:flex; align-items:center; justify-content:space-between; color:var(--lab-secondary); font-size:10px; }.selection-dot { width:5px; height:5px; border-radius:50%; background:transparent; }.selected .selection-dot { background:var(--lab-ink); }
-.variant-name { display:block; margin-top:4px; font-size:13px; font-weight:500; }
+.variant-picker { margin-top:16px; }
+.variant-option { display:flex; width:100%; min-width:0; min-height:44px; align-items:center; justify-content:space-between; gap:6px; padding:0 12px; text-align:left; }
+.variant-name { min-width:0; font-size:13px; }
+.variant-picker { border-top:1px solid var(--lab-line); background:#fff; }
+.variant-option { border-bottom:1px solid var(--lab-line); }
+.selected .variant-name { color:#315d89; font-weight:650; }
 .variant-description { display:block; min-height:36px; padding:12px 2px 0; color:var(--lab-secondary); font-size:11px; line-height:1.6; }
-.lab-actions { display:flex; gap:10px; margin-top:16px; }.demo-button, .finish-button { flex:1; min-height:46px; display:flex; align-items:center; justify-content:center; gap:8px; border-radius:14px; font-size:13px; font-weight:500; }.demo-button { background:var(--lab-ink); color:#fff; }.finish-button { background:#fff; border:1px solid var(--lab-line); }
+.lab-actions { display:flex; gap:10px; margin-top:16px; }
+.demo-button,.finish-button { flex:1; min-height:44px; color:#315d89; font-size:13px; font-weight:650; }
+.finish-button { border-left:1px solid var(--lab-line); }
 .demo-hint { display:block; margin:10px 0 20px; text-align:center; font-size:10px; color:var(--lab-secondary); }
-.lab-options { padding:0 15px; background:white; border-radius:18px; }.lab-option-row { width:100%; min-height:52px; display:flex; align-items:center; justify-content:space-between; font-size:12px; }.lab-option-row + .lab-option-row { border-top:1px solid #f0f0f2; }
-.speed-picker { height:38px; box-sizing:border-box; display:flex; align-items:center; padding:3px; background:#f0f0f2; border-radius:8px; }
-.speed-picker button { min-width:51px; height:30px; min-height:30px; display:flex; align-items:center; justify-content:center; box-sizing:border-box; margin:0; padding:0 8px; line-height:1; font-size:11px; border-radius:6px; color:var(--lab-secondary); }
-.speed-picker .active { background:white; color:var(--lab-ink); box-shadow:0 1px 3px #0000000d; }
-.lab-toggle { width:36px; height:22px; border-radius:12px; background:var(--lab-line); padding:2px; }.lab-toggle view { height:18px; width:18px; border-radius:50%; background:white; box-shadow:0 1px 3px #00000018; }.lab-toggle.on { background:var(--lab-accent); }.lab-toggle.on view { transform:translateX(14px); }
+.lab-options { padding:0 15px; border-block:1px solid var(--lab-line); background:#fff; }
+.lab-option-row { width:100%; min-height:52px; display:flex; align-items:center; justify-content:space-between; font-size:12px; }
+.lab-option-row + .lab-option-row { border-top:1px solid var(--lab-line); }
+.speed-picker { display:flex; align-items:center; }
+.speed-picker button { min-width:44px; min-height:44px; display:grid; place-items:center; font-size:11px; color:var(--lab-secondary); }
+.speed-picker .active { color:#315d89; font-weight:650; text-decoration:underline; text-underline-offset:5px; }
+.lab-toggle { width:36px; height:22px; border-radius:12px; background:var(--lab-line); padding:2px; }
+.lab-toggle view { height:18px; width:18px; border-radius:50%; background:white; box-shadow:0 1px 3px #00000018; }
+.lab-toggle.on { background:var(--lab-accent); }
+.lab-toggle.on view { transform:translateX(14px); }
 .lab-footnote { display:block; margin:20px 4px 0; color:var(--lab-secondary); font-size:10px; line-height:1.8; text-align:center; }
 @media (max-width:360px) { .lab-content { padding-left:18px; padding-right:18px; }.lab-title { font-size:25px; }.lab-stage { height:234px; } }
 @media (prefers-reduced-transparency:reduce) { .with-context .lab-status { background:white; }.lab-context { filter:none; opacity:.1; } }

@@ -36,7 +36,11 @@ async function main(){
     const shot=async name=>{const {data}=await send('Page.captureScreenshot',{format:'png'});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(data,'base64'))};
     // Developer-only test tab is intentionally omitted in production builds.
     // Set GLASS_TEST_URL to the H5 dev server when that gate is enabled.
-    if(process.env.GLASS_NAV_MOTION==='flow')await send('Page.addScriptToEvaluateOnNewDocument',{source:"localStorage.setItem('lakeside:nav-motion:v1',JSON.stringify({type:'string',data:'flow'}))"});
+    const motion = process.env.GLASS_NAV_MOTION === 'hop' ? 'hop' : 'flow';
+    await send('Page.addScriptToEvaluateOnNewDocument',{source:`
+      localStorage.setItem('lakeside:nav-motion:v1',JSON.stringify({type:'string',data:${JSON.stringify(motion)}}));
+      localStorage.setItem('lakeside:glass-touch-light:v1',JSON.stringify({type:'boolean',data:true}));
+    `});
     await send('Page.navigate',{url:process.env.GLASS_TEST_URL||`http://127.0.0.1:${server.address().port}/`});
     await wait("Boolean(document.querySelector('#liquid-nav-root .glass-touch-light[data-active]'))");
     const hasLab=await evaluate("Boolean(document.querySelector('#liquid-nav-root [data-nav-index=\"3\"]'))");

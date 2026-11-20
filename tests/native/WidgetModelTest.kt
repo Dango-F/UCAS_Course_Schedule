@@ -26,6 +26,24 @@ fun main(args: Array<String>) {
         check(state.today.size == 2 && state.remaining == 0)
         check(state.next != null && state.next.date > state.date)
     }
+    test("Large list keeps unfinished classes first and orders overlapping finished classes by end time") {
+        val example = snapshot.courses.first()
+        val date = "2026-09-14"
+        fun course(id: String, start: String, end: String) = example.copy(
+            id = id, date = date, start = at(date, start), end = at(date, end), startTime = start, endTime = end
+        )
+        val long = course("long", "08:30", "11:00")
+        val short = course("short", "09:00", "10:00")
+        val current = course("current", "10:30", "12:00")
+        val upcoming = course("upcoming", "14:00", "16:00")
+        val rows = listOf(long, short, current, upcoming)
+        val now = long.end
+        check(WidgetSelector.largeCourses(rows, short.end) == listOf(long, current, upcoming, short))
+        check(WidgetSelector.largeCourses(rows, now) == listOf(current, upcoming, short, long))
+        check(WidgetSelector.largeCourses(rows, upcoming.end) == listOf(short, long, current, upcoming))
+        val restored = WidgetSnapshot.parse(snapshot.copy(courses = rows).json(now).toString())
+        check(WidgetSelector.largeCourses(restored.courses, now) == listOf(current, upcoming, short, long))
+    }
     test("Before semester selects first course; after semester is ended") {
         check(WidgetSelector.select(snapshot, "valid", at("2026-08-01", "12:00")).let { it.stage == "before" && it.next?.date == "2026-08-31" })
         check(WidgetSelector.select(snapshot, "valid", at("2027-03-01", "12:00")).let { it.stage == "ended" && it.next == null })
@@ -47,13 +65,13 @@ fun main(args: Array<String>) {
         check(tomorrow.date == "2026-09-13" && tomorrow.today.isEmpty() && tomorrow.next == null)
         check(WidgetSelector.select(snapshot, "valid", now).next?.date == "2026-09-14")
     }
-    test("Preview persists within the same day and resets after Shanghai midnight") {
+    test("Wide preview persists within the same day and resets after Shanghai midnight") {
         val now = at("2026-09-13", "23:59")
-        check(WidgetDayView.offset("2026-09-13", 1, now) == 1)
-        check(WidgetDayView.offset("2026-09-13", 1, at("2026-09-14", "00:00")) == 0)
-        check(WidgetDayView.offset("2026-09-13", 0, now) == 0)
-        check(WidgetDayView.offset("2026-09-13", 9, now) == 0)
-        check(WidgetDayView.offset(null, 1, now) == 0)
+        check(WidgetDayView.offset("large", "2026-09-13", 1, now) == 1)
+        check(WidgetDayView.offset("large", "2026-09-13", 1, at("2026-09-14", "00:00")) == 0)
+        check(WidgetDayView.offset("large", "2026-09-13", 0, now) == 0)
+        check(WidgetDayView.offset("large", "2026-09-13", 9, now) == 0)
+        check(WidgetDayView.offset("large", null, 1, now) == 0)
     }
     test("Tomorrow selection respects semester start/end and confirmation") {
         check(WidgetSelector.select(snapshot, "valid", at("2026-08-30", "21:00"), 1).let {
@@ -92,16 +110,19 @@ fun main(args: Array<String>) {
         check(WidgetSelector.smallCourses(data, selection, first.start, 99).size == 4)
         check(WidgetSelector.smallCourses(data, selection, first.start, 1) == rows.take(1))
     }
-    test("Four-course tomorrow preview never fills unused slots from the following day") {
+    test("Compact widget ignores a saved tomorrow mode and fills unused slots from later dates") {
         val first = snapshot.courses.first()
         val now = WidgetClock.midnight(first.date) - 3600000L
         val nextDate = WidgetClock.date(WidgetClock.midnight(first.date) + 86400000L)
         val rows = (0..3).map { first.copy(id = "tomorrow-$it", start = first.start + it * 60000L, end = first.end + it * 60000L) }
         val later = first.copy(id = "following-day", date = nextDate, start = first.start + 86400000L, end = first.end + 86400000L)
         val data = snapshot.copy(courses = rows + later)
-        check(WidgetSelector.smallCourses(data, WidgetSelector.select(data, "valid", now, 1), now, 4) == rows)
+        val offset = WidgetDayView.offset("small", WidgetClock.date(now), 1, now)
+        val selection = WidgetSelector.select(data, "valid", now, offset)
+        check(selection.date == WidgetClock.date(now) && selection.remaining == 0)
+        check(WidgetSelector.smallCourses(data, selection, now, 4) == rows)
         val three = data.copy(courses = rows.take(3) + later)
-        check(WidgetSelector.smallCourses(three, WidgetSelector.select(three, "valid", now, 1), now, 4) == rows.take(3))
+        check(WidgetSelector.smallCourses(three, WidgetSelector.select(three, "valid", now, offset), now, 4) == three.courses)
     }
     test("Four-course normal mode excludes finished courses and avoids duplicates") {
         val first = snapshot.courses.first()
@@ -124,13 +145,13 @@ fun main(args: Array<String>) {
         check(WidgetSelector.smallCourses(data, selected, now, 99) == rows)
         check(WidgetSelector.smallCourses(data, selected, now, 2) == rows.take(2))
     }
-    test("Tall tomorrow preview uses all available tomorrow courses and never a later day") {
+    test("Tall compact widget can continue past tomorrow") {
         val first = snapshot.courses.first()
         val now = WidgetClock.midnight(first.date) - 3600000L
         val tomorrow = (0..6).map { first.copy(id = "tomorrow-extra-$it", start = first.start + it * 60000L, end = first.end + it * 60000L) }
         val later = first.copy(id = "later-day", date = WidgetClock.date(WidgetClock.midnight(first.date) + 86400000L), start = first.start + 86400000L, end = first.end + 86400000L)
         val data = snapshot.copy(courses = tomorrow + later)
-        check(WidgetSelector.smallCourses(data, WidgetSelector.select(data, "valid", now, 1), now, 12) == tomorrow)
+        check(WidgetSelector.smallCourses(data, WidgetSelector.select(data, "valid", now), now, 12) == tomorrow + later)
     }
     test("Compact height boundaries grow capacity and shrink back to two or four") {
         fun count(height: Float) = SmallWidgetSizing.candidateLimit(height, 180f)
@@ -143,21 +164,32 @@ fun main(args: Array<String>) {
         check(count(Float.NaN) == 2 && count(100000f) == 64)
     }
     test("One-row update pre-sends the two-row and taller layouts before resize callbacks") {
-        val heights = SmallWidgetSizing.responsiveHeights(180f, 800f)
-        check(heights.containsAll(listOf(48f, 62f, 78f, 140f, 180f, 270f, 360f)))
-        fun displayed(height: Float): Int = SmallWidgetSizing.candidateLimit(heights.last { it <= height }, 180f)
+        val frames = SmallWidgetSizing.responsiveFrames(180f, 800f, 86f)
+        fun layout(height: Float, width: Float = 320f) = frames.last { it.minWidth <= width && it.minHeight <= height }.layoutHeight
+        check(frames.map { it.layoutHeight }.containsAll(listOf(48f, 62f, 78f, 140f, 180f, 270f, 360f)))
+        fun displayed(height: Float): Int = SmallWidgetSizing.candidateLimit(layout(height), 180f)
+        check(layout(36f) == 48f && layout(60f) == 48f && layout(64f) == 62f && layout(86f) == 78f)
         check(displayed(84f) == 2)
-        check(displayed(180f) == 4)
+        check(displayed(140f) == 4 && displayed(192.67f) == 4)
         check(displayed(84f) == 2) // shrink without generating another plan
         check(displayed(320f) == 6 && displayed(360f) == 8)
+        for (width in listOf(250f, 319.5f, 342f, 360f, 600f)) {
+            check(layout(86f, width) == 78f && layout(192.67f, width) == 180f)
+        }
+        val heights = frames.map { it.minHeight }
         check(heights == heights.sorted().distinct() && heights.size <= 16)
     }
     test("Responsive plan handles missing sizes and stays within Android's 16-frame limit") {
-        val fallback = SmallWidgetSizing.responsiveHeights(Float.NaN, Float.NaN)
-        check(fallback.containsAll(listOf(48f, 140f, 180f, 270f, 360f)))
-        val huge = SmallWidgetSizing.responsiveHeights(180f, 3000f)
+        val fallback = SmallWidgetSizing.responsiveFrames(Float.NaN, Float.NaN, Float.NaN)
+        check(fallback.first().layoutHeight == 78f)
+        check(fallback.map { it.layoutHeight }.containsAll(listOf(48f, 140f, 180f, 270f, 360f)))
+        for ((reported, expected) in listOf(0f to 78f, 53f to 48f, 68f to 62f, 86f to 78f, 155f to 140f, 192.67f to 180f)) {
+            check(SmallWidgetSizing.responsiveFrames(180f, 800f, reported).first().layoutHeight == expected)
+        }
+        val frames = SmallWidgetSizing.responsiveFrames(180f, 3000f, 192.67f)
+        val huge = frames.map { it.minHeight }
         check(huge.size == 16 && huge == huge.sorted().distinct())
-        check(SmallWidgetSizing.candidateLimit(huge.last(), 180f) == 64)
+        check(SmallWidgetSizing.candidateLimit(frames.last().layoutHeight, 180f) == 64)
         check(huge.contains(140f) && huge.contains(180f))
     }
     test("Repeated resize requests drop outdated work but keep the newest widget frame") {
@@ -210,14 +242,13 @@ fun main(args: Array<String>) {
         check(SmallWidgetSizing.fitCount(320f, List(12) { 54f }, 32.818f, 7f, 0f) == 4)
         check(SmallWidgetSizing.fitCount(320f, emptyList(), 32.818f, 7f) == 0)
     }
-    test("Two-course tomorrow preview stays within tomorrow and handles one or no courses") {
+    test("Compact widget handles one or no remaining courses") {
         val now = at("2026-09-13", "21:00")
-        val selection = WidgetSelector.select(snapshot, "valid", now, 1)
-        check(WidgetSelector.smallCourses(snapshot, selection, now, 2) == selection.today.take(2))
-        val one = snapshot.copy(courses = snapshot.courses.filter { it.date != selection.date || it.id == selection.today.first().id })
-        check(WidgetSelector.smallCourses(one, WidgetSelector.select(one, "valid", now, 1), now, 2).size == 1)
-        val empty = WidgetSelector.select(snapshot, "valid", at("2026-09-12", "21:00"), 1)
-        check(WidgetSelector.smallCourses(snapshot, empty, at("2026-09-12", "21:00"), 2).isEmpty())
+        val last = snapshot.courses.first { it.start > now }
+        val one = snapshot.copy(courses = listOf(last))
+        check(WidgetSelector.smallCourses(one, WidgetSelector.select(one, "valid", now), now, 2) == listOf(last))
+        val ended = WidgetSelector.select(one, "valid", last.end)
+        check(WidgetSelector.smallCourses(one, ended, last.end, 2).isEmpty())
     }
     test("Small widget future lookup crosses dates but respects semester and cache stages") {
         val now = at("2026-09-13", "12:00")
@@ -268,6 +299,23 @@ fun main(args: Array<String>) {
         check(WidgetOptions.read("large", JSONObject().put("opacity", 2)).opacity == 60)
         check(WidgetOptions.read("small", JSONObject().put("showSections", true).put("opacity", 92)).let { !it.sections && it.opacity == 90 })
     }
+    test("Shared opacity migrates a custom setting and visibility patches preserve it") {
+        val defaultCard = JSONObject().put("opacity", 80)
+        val olderCustomCard = JSONObject().put("opacity", 65).put("showLocation", false)
+        val newerCustomCard = JSONObject().put("opacity", 95)
+        val shared = WidgetOptions.legacyOpacity(sequenceOf(defaultCard, olderCustomCard, newerCustomCard))
+        check(shared == 65)
+        check(WidgetOptions.legacyOpacity(sequenceOf(defaultCard, JSONObject())) == 80)
+
+        val wide = WidgetOptions.read("large", olderCustomCard).copy(opacity = shared)
+        val compact = WidgetOptions.read("small", newerCustomCard).copy(opacity = shared)
+        val changed = compact.withChanges("small", JSONObject().put("opacity", 90))
+        val edited = wide.copy(opacity = changed.opacity)
+            .withChanges("large", JSONObject().put("showTeachers", false))
+        check(edited.opacity == changed.opacity && changed.opacity == 90)
+        check(!edited.teachers && !edited.location && edited.sections)
+        check(changed.teachers && changed.location && !changed.sections)
+    }
     test("Teacher defaults upgrade legacy small options but preserve new explicit hide settings") {
         val legacy = JSONObject().put("showTeachers", false).put("showLocation", false).put("opacity", 65)
         check(WidgetOptions.read("small", legacy, migrateLegacy = true).let { it.teachers && !it.location && it.opacity == 65 })
@@ -299,6 +347,64 @@ fun main(args: Array<String>) {
         check(WidgetText.courseState(course, course.start) == "active")
         check(WidgetText.courseState(course, course.end-1) == "active")
         check(WidgetText.courseState(course, course.end) == "ended")
+    }
+    test("Refresh follows unique course boundaries and skips the overnight gap") {
+        val original = snapshot.courses.first()
+        val morning = original.copy(start = at("2026-09-14", "08:30"), end = at("2026-09-14", "10:10"))
+        val following = original.copy(start = morning.end, end = at("2026-09-14", "12:00"))
+        val later = original.copy(start = at("2026-09-16", "15:00"), end = at("2026-09-16", "17:00"))
+        val schedule = snapshot.copy(courses = listOf(morning, morning, following, later))
+        var now = morning.start - 1
+        for (expected in listOf(morning.start, morning.end, following.end, later.start, later.end)) {
+            check(WidgetCourseBoundaries.next(schedule, now) == expected)
+            now = expected
+        }
+        check(WidgetCourseBoundaries.next(schedule, now) == null)
+    }
+    test("Alarm delivery rejects early, superseded, canceled and removed boundaries") {
+        val course = snapshot.courses.first()
+        val schedule = snapshot.copy(courses = listOf(course))
+        check(WidgetCourseBoundaries.isDue(schedule, course.start, course.start, course.start))
+        check(WidgetCourseBoundaries.isDue(schedule, course.start, course.start, course.start + 60_000))
+        check(!WidgetCourseBoundaries.isDue(schedule, course.start, course.start, course.start - 1))
+        check(!WidgetCourseBoundaries.isDue(schedule, course.end, course.start, course.start))
+        check(!WidgetCourseBoundaries.isDue(schedule, 0L, course.start, course.start))
+        check(!WidgetCourseBoundaries.isDue(schedule.copy(courses = emptyList()), course.start, course.start, course.start))
+        check(WidgetCourseBoundaries.next(schedule.copy(semester = requireNotNull(schedule.semester).copy(confirmed = false)), course.start - 1) == null)
+        check(WidgetCourseBoundaries.next(null, course.start - 1) == null)
+    }
+    test("Missing exact access and an exact registration denial arm the same boundary inexactly") {
+        for (allowed in listOf(true, false)) {
+            val calls = mutableListOf<String>()
+            val exact = registerCourseAlarm(allowed, exact = {
+                calls.add("exact")
+                throw SecurityException("denied")
+            }, inexact = { calls.add("inexact") })
+            check(!exact)
+            check(calls == if (allowed) listOf("exact", "inexact") else listOf("inexact"))
+        }
+        check(registerCourseAlarm(true, exact = {}, inexact = { error("Unexpected second alarm") }))
+    }
+    test("Foreground recovery consumes an overdue boundary once and keeps the following alarm") {
+        val course = snapshot.courses.first()
+        val single = snapshot.copy(courses = listOf(course))
+        val initial = WidgetCourseBoundaries.update(single, 0, null, course.start - 1)!!
+        check(initial.nextAt == course.start && !initial.refreshDue)
+        val recovered = WidgetCourseBoundaries.update(single, initial.nextAt!!, null, course.start + 1)!!
+        check(recovered.refreshDue && recovered.nextAt == course.end)
+        check(WidgetCourseBoundaries.update(single, recovered.nextAt!!, course.start, course.start + 2) == null)
+        val final = WidgetCourseBoundaries.update(single, course.end, course.end, course.end)!!
+        check(final.refreshDue && final.nextAt == null)
+    }
+    test("A delayed cold delivery catches up after both edges; edits and widget removal invalidate old edges") {
+        val course = snapshot.courses.first()
+        val single = snapshot.copy(courses = listOf(course))
+        val late = WidgetCourseBoundaries.update(single, course.start, course.start, course.end + 1)!!
+        check(late.refreshDue && late.nextAt == null)
+        val early = WidgetCourseBoundaries.update(single, course.start, course.start, course.start - 1)!!
+        check(!early.refreshDue && early.nextAt == course.start)
+        val empty = WidgetCourseBoundaries.update(null, course.start, course.start, course.end + 1)!!
+        check(!empty.refreshDue && empty.nextAt == null)
     }
     println("$checks native model/contract scenarios passed")
 }

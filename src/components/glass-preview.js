@@ -9,14 +9,14 @@ export function createGlassPreview(root, initialClarity) {
   const button = root.querySelector('.glass-compare')
   const lensRoot = root.querySelector('.preview-lens-root')
   const normalize = value => {
-    const next = typeof value === 'number' ? {clarity:value,navMotion:'hop',hopPeak:DEFAULT_HOP_PEAK} : value
-    return {...next,hopPreviewRun:next.hopPreviewRun ?? 0,hopPreviewStop:next.hopPreviewStop ?? 0}
+    const next = typeof value === 'number' ? {clarity:value} : value
+    return {navMotion:'flow',qElastic:false,touchLight:false,hopPeak:DEFAULT_HOP_PEAK,...next,hopPreviewRun:next.hopPreviewRun ?? 0,hopPreviewStop:next.hopPreviewStop ?? 0}
   }
   let config = normalize(initialClarity), clarity = normalizeGlassClarity(config.clarity), comparing = false, disposed = false
   let activeIndex = 0
   let pointer = null, heldKey = null
   let demoStart = null, demoReturn = null, demoVersion = 0
-  const current = () => ({...config,activeIndex,clarity:comparing ? DEFAULT_GLASS_CLARITY : clarity})
+  const current = () => ({...config,activeIndex,allowPagePan:true,clarity:comparing ? DEFAULT_GLASS_CLARITY : clarity})
   const lens = createGlassNavigation(lensRoot, current(), index => {
     cancelDemo()
     activeIndex = index
@@ -25,7 +25,6 @@ export function createGlassPreview(root, initialClarity) {
   })
   function syncSelection() {
     lensRoot.querySelectorAll('[data-nav-index]').forEach((item,i) => {
-      item.classList.toggle('active',i===activeIndex)
       item.setAttribute('aria-pressed',String(i===activeIndex))
     })
   }

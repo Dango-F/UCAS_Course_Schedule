@@ -9,32 +9,20 @@ const Q_ELASTIC_KEY = 'lakeside:nav-q-elastic:v1'
 const TOUCH_LIGHT_KEY = 'lakeside:glass-touch-light:v1'
 const HOP_PEAK_KEY = 'lakeside:nav-hop-peak:v1'
 const VISIBILITY_KEY = 'lakeside:nav-visibility:v1'
-const SETTINGS_MOTION_KEY = 'lakeside:settings-motion:v1'
 export type NavigationMotion = 'flow' | 'hop'
 export type NavigationVisibility = 'fixed' | 'auto'
 function readVisibility(): NavigationVisibility {
   try { return uni.getStorageSync(VISIBILITY_KEY) === 'auto' ? 'auto' : 'fixed' } catch { return 'fixed' }
 }
-export type SettingsMotion = 'card' | 'slide' | 'page' | 'shape'
 function readMotion(): NavigationMotion {
-  try { return uni.getStorageSync(MOTION_KEY) === 'flow' ? 'flow' : 'hop' } catch { return 'hop' }
+  try { return uni.getStorageSync(MOTION_KEY) === 'hop' ? 'hop' : 'flow' } catch { return 'flow' }
 }
-function readQElastic(): boolean {
-  try { return uni.getStorageSync(Q_ELASTIC_KEY) !== false } catch { return true }
-}
-function readTouchLight(): boolean {
-  try { return uni.getStorageSync(TOUCH_LIGHT_KEY) !== false } catch { return true }
+function readEnabled(key: string): boolean {
+  try { return uni.getStorageSync(key) === true } catch { return false }
 }
 function readHopPeak(): number {
   try { return normalizeHopPeak(uni.getStorageSync(HOP_PEAK_KEY)) } catch { return DEFAULT_HOP_PEAK }
 }
-function readSettingsMotion(): SettingsMotion {
-  try {
-    const saved = uni.getStorageSync(SETTINGS_MOTION_KEY)
-    return saved === 'card' || saved === 'page' || saved === 'shape' ? saved : 'slide'
-  } catch { return 'slide' }
-}
-
 function readClarity(): number {
   try {
     const raw = uni.getStorageSync(STORAGE_KEY)
@@ -43,7 +31,7 @@ function readClarity(): number {
 }
 
 export const useAppearanceStore = defineStore('appearance', () => {
-  const glassTouchLight = ref(readTouchLight())
+  const glassTouchLight = ref(readEnabled(TOUCH_LIGHT_KEY))
   const touchLightSaveError = ref(false)
   function setGlassTouchLight(value: boolean) {
     glassTouchLight.value = Boolean(value)
@@ -65,7 +53,7 @@ export const useAppearanceStore = defineStore('appearance', () => {
     catch { motionSaveError.value = true }
   }
   const navHopPeak = ref(readHopPeak())
-  const qElastic = ref(readQElastic())
+  const qElastic = ref(readEnabled(Q_ELASTIC_KEY))
   const qElasticSaveError = ref(false)
   function setQElastic(value: boolean) {
     qElastic.value = Boolean(value)
@@ -88,13 +76,6 @@ export const useAppearanceStore = defineStore('appearance', () => {
       return false
     }
   }
-  const settingsMotion = ref<SettingsMotion>(readSettingsMotion())
-  const settingsMotionSaveError = ref(false)
-  function setSettingsMotion(value: SettingsMotion) {
-    settingsMotion.value = value === 'card' || value === 'page' || value === 'shape' ? value : 'slide'
-    try { uni.setStorageSync(SETTINGS_MOTION_KEY, settingsMotion.value); settingsMotionSaveError.value = false }
-    catch { settingsMotionSaveError.value = true }
-  }
   const glassClarity = ref(readClarity())
   const saveError = ref(false)
   let savedClarity = glassClarity.value
@@ -114,5 +95,5 @@ export const useAppearanceStore = defineStore('appearance', () => {
       return false
     }
   }
-  return { glassTouchLight, touchLightSaveError, setGlassTouchLight, glassClarity, saveError, previewClarity, saveClarity, navMotion, motionSaveError, setNavMotion, qElastic, qElasticSaveError, setQElastic, navHopPeak, hopPeakSaveError, previewHopPeak, saveHopPeak, navVisibility, visibilitySaveError, setNavVisibility, settingsMotion, settingsMotionSaveError, setSettingsMotion }
+  return { glassTouchLight, touchLightSaveError, setGlassTouchLight, glassClarity, saveError, previewClarity, saveClarity, navMotion, motionSaveError, setNavMotion, qElastic, qElasticSaveError, setQElastic, navHopPeak, hopPeakSaveError, previewHopPeak, saveHopPeak, navVisibility, visibilitySaveError, setNavVisibility }
 })

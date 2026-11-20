@@ -130,8 +130,20 @@ export function createGlassBackdropAdaptation(root) {
     const box=surface.getBoundingClientRect()
     if(box.width<=0||box.height<=0||box.bottom<0||box.top>win.innerHeight)return
     const items=[...root.querySelectorAll('.nav-item')]
-    const styles=new Map(),rects=new Map()
-    const styleOf=el=>{if(!styles.has(el))styles.set(el,win.getComputedStyle(el));return styles.get(el)}
+    const paints=new Map(),rects=new Map()
+    function paintOf(el) {
+      if (!paints.has(el)) {
+        const style=win.getComputedStyle(el), opacity=clamp(Number(style.opacity))
+        const bg=parseBackdropColor(style.backgroundColor)
+        const media=['CANVAS','VIDEO','IFRAME','svg','IMG','UNI-IMAGE'].includes(el.tagName) ||
+          el.ownerSVGElement || (style.backgroundImage && style.backgroundImage!=='none')
+        // Transparent wrappers contribute no pixel. Only a painted surface
+        // needs a rectangle, and its colour is resolved once for all nine rays.
+        paints.set(el,opacity && style.visibility!=='hidden' && style.display!=='none' && (media || bg?.[3])
+          ? {style,opacity,bg,media} : null)
+      }
+      return paints.get(el)
+    }
     const rectOf=el=>{if(!rects.has(el))rects.set(el,el.getBoundingClientRect());return rects.get(el)}
     const sample=(x,y)=>{
       let result=[0,0,0,0],visited=new Set()
@@ -139,21 +151,20 @@ export function createGlassBackdropAdaptation(root) {
       for(const el of stack.slice(0,40)){
         if(root.contains(el)||el.closest('.liquid-nav,.preview-lens-root')||visited.has(el))continue
         visited.add(el)
-        const style=styleOf(el)
-        if(style.visibility==='hidden'||style.display==='none'||Number(style.opacity)===0)continue
+        const paint=paintOf(el)
+        if(!paint)continue
         // Group opacity and transformed/filtered media are only approximations.
-        const opacity=clamp(Number(style.opacity)),rect=rectOf(el)
+        const {style,opacity,bg}=paint,rect=rectOf(el)
         if(x<rect.left||x>rect.right||y<rect.top||y>rect.bottom)continue
-        const media=imageAt(el,style,rect,x,y)
+        const media=paint.media && imageAt(el,style,rect,x,y)
         if(media?.unknown&&result[3]<.95)return null
         if(media?.color)result=compositeBackdrop(result,[...media.color.slice(0,3),media.color[3]*opacity])
-        const bg=parseBackdropColor(style.backgroundColor)
         if(bg)result=compositeBackdrop(result,[...bg.slice(0,3),bg[3]*opacity])
         if(result[3]>.98)break
       }
       return backdropLuminance(compositeBackdrop(result,[1,1,1,1]))
     }
-    const all=[]
+    const all=[],tones=[]
     // Three points per item, inset from distorted edges; ignore glyph colour.
     items.forEach((item,index)=>{
       const values=[]
@@ -161,15 +172,35 @@ export function createGlassBackdropAdaptation(root) {
         const x=box.left+box.width*(index+dx)/items.length,y=box.top+box.height*dy
         const value=sample(x,y);if(value!==null)values.push(value)
       }
-      if(values.length>=2){const l=values.reduce((a,b)=>a+b,0)/values.length;all.push(l);set(item,'glassBackdropTone',nextBackdropTone(item.dataset.glassBackdropTone,l))}
+      if(values.length>=2){
+        const l=values.reduce((a,b)=>a+b,0)/values.length
+        all.push(l)
+        tones.push([item,nextBackdropTone(item.dataset.glassBackdropTone,l)])
+      }
     })
+    // Hit-test all items against the same frame before invalidating styles.
+    for(const [item,tone] of tones)set(item,'glassBackdropTone',tone)
     if(all.length>=Math.ceil(items.length/2))set(root,'glassBackdropTone',nextBackdropTone(root.dataset.glassBackdropTone,all.reduce((a,b)=>a+b,0)/all.length))
     checks++
   }
+  const attributes={attributes:true,attributeFilter:['style','class','src','srcset']}
   const observer=new win.MutationObserver(records=>{
-    if(records.some(r=>!root.contains(r.target)&&!r.target.closest?.('.liquid-nav,.preview-lens-root')))schedule()
+    if(!hidden() && records.some(r=>!r.target.closest?.('.liquid-nav,.preview-lens-root')))schedule()
   })
-  observer.observe(scope,{subtree:true,childList:true,attributes:true,attributeFilter:['style','class','src','srcset']})
+  function observeBackground() {
+    observer.disconnect()
+    for(const child of scope.children) {
+      if(child!==root && !child.matches('.liquid-nav,.preview-lens-root')) observer.observe(child,{...attributes,childList:true,subtree:true})
+    }
+  }
+  // Never subscribe the sampler to its own per-frame transforms, highlighter
+  // or SVG filter writes. Route insertion/replacement updates the subscriptions.
+  const routeObserver=new win.MutationObserver(records=>{
+    if(records.some(r=>r.type==='childList'))observeBackground()
+    if(!hidden())schedule()
+  })
+  routeObserver.observe(scope,{...attributes,childList:true})
+  observeBackground()
   const stateObserver=new win.MutationObserver(schedule)
   stateObserver.observe(root,{attributes:true,attributeFilter:['data-navigation-hidden','data-nav-idle','inert','data-glass-adaptive']})
   const resize=win.ResizeObserver?new win.ResizeObserver(schedule):null
@@ -189,7 +220,7 @@ export function createGlassBackdropAdaptation(root) {
     // Counts are read on demand for regression checks, never written per frame.
     stats:()=>({checks,imageReads:reads,cachedImages:images.size,pending:Boolean(timer)}),
     destroy(){
-      disposed=true;win.clearTimeout(timer);observer.disconnect();stateObserver.disconnect();resize?.disconnect()
+      disposed=true;win.clearTimeout(timer);observer.disconnect();routeObserver.disconnect();stateObserver.disconnect();resize?.disconnect()
       listeners.forEach(remove=>remove());solid.removeEventListener?.('change',schedule)
       ownedImages.forEach(img=>{img.onload=null;img.onerror=null});ownedImages.clear();images.clear();reset()
     }

@@ -1,3 +1,5 @@
+import { createGridGesture, GRID_HOLD_SLOP } from './calendar-grid-gesture.js'
+
 // V2 keeps chronological slots and the built-in swiper's fractional-page
 // distance/velocity decision, but gives release animation to the compositor.
 export function settleWeek(position, velocity, maxWeek) {
@@ -10,7 +12,16 @@ export function weekDuration(remaining, width, velocity) {
   const fraction = Math.min(1, remaining / width)
   const speed = Math.min(1, Math.abs(velocity) / 1.2)
   // Slow drags ease out gently; fast repeated flicks retain a short finish.
-  return Math.round(Math.max(120, 150 + fraction * 110 - speed * 45))
+  return Math.round(Math.max(50, 64 + fraction * 36 - speed * 19))
+}
+
+// For a Bézier easing, the initial speed in pixels/ms is
+// (distance / duration) * (y1 / x1). The horizontal end tangent stops at the week.
+export function weekReleaseEasing(distance, duration, velocity) {
+  const slope = distance ? Math.max(0, velocity * duration / distance) : 0
+  const x1 = 1 / Math.max(3, slope)
+  const y1 = Math.min(1, slope / 3)
+  return `cubic-bezier(${x1},${y1},.666667,1)`
 }
 
 export function boundWeekPosition(position, last) {
@@ -18,29 +29,35 @@ export function boundWeekPosition(position, last) {
   return position < 0 ? -rubber(-position) : position > last ? last + rubber(position - last) : position
 }
 
-export function createStableWeekController(root, initialConfig, notify) {
+export function createStableWeekController(root, initialConfig, notify, editSlot) {
   const track = root.querySelector('.week-track')
   if (!track) return { destroy() {}, configure() {} }
+  const quiet = root.ownerDocument?.defaultView?.matchMedia?.('(prefers-reduced-motion: reduce)')
   let config = initialConfig
   let width = root.getBoundingClientRect().width || 390
   let position = config.week - 1
   let destination = position
   let reported = position
   let gesture = null
+  let listeningForMoves = false
   let settling = false
+  let releaseAnimation = null
   let timer = 0
   let generation = 0
   let started = 0
   let duration = 0
   let suppressedUntil = 0
+  const grid = editSlot ? createGridGesture(root, cancel, editSlot) : null
+  let mouseEditing = false
   let destroyed = false
   let preparedPanels = []
   let preparedMin = position
   let preparedMax = position
   const now = () => performance.now()
+  const translation = value => `translate3d(${-value * width}px,0,0)`
   function paint(value) {
     position = value
-    track.style.transform = `translate3d(${-value * width}px,0,0)`
+    track.style.transform = translation(value)
   }
   function visiblePosition() {
     const transform = getComputedStyle(track).transform
@@ -49,6 +66,11 @@ export function createStableWeekController(root, initialConfig, notify) {
     return Number.isFinite(x) ? -x / width : position
   }
   function stop() {
+    if (releaseAnimation) {
+      releaseAnimation.onfinish = null
+      releaseAnimation.cancel()
+      releaseAnimation = null
+    }
     clearTimeout(timer)
     timer = 0
     generation += 1
@@ -95,61 +117,79 @@ export function createStableWeekController(root, initialConfig, notify) {
     resetOffscreenScroll()
     // The target was already reported at release; completion is visual only.
   }
-  function settle(target, velocity = 0) {
+  function settle(target, velocity = 0, trackVelocity = velocity) {
     stop()
     destination = Math.max(0, Math.min(config.maxWeek - 1, target))
-    duration = config.reducedMotion ? 0 : weekDuration(Math.abs(destination - position) * width, width, velocity)
+    const distance = (destination - position) * width
+    duration = config.reducedMotion || quiet?.matches ? 0 : weekDuration(Math.abs(distance), width, velocity)
     settling = true
     const token = generation
     started = now()
     root.setAttribute('data-motion-phase', 'settling')
-    // One release-time flush commits even a tiny drag before CSS transitions.
-    // No rAF loop, reactive updates or layout reads on the movement path.
-    if (duration) void track.offsetWidth
-    track.style.transition = duration ? `transform ${duration}ms cubic-bezier(.22,.68,.36,1)` : 'none'
+    const easing = weekReleaseEasing(distance, duration, trackVelocity)
+    if (duration && track.animate) {
+      releaseAnimation = track.animate([{ transform: translation(position) }, { transform: translation(destination) }], { duration, easing })
+      releaseAnimation.onfinish = () => finish(token)
+    } else if (duration) {
+      void track.offsetWidth
+      track.style.transition = `transform ${duration}ms ${easing}`
+    }
     paint(destination)
-    if (duration) timer = setTimeout(() => finish(token), duration + 50)
+    if (duration && !releaseAnimation) timer = setTimeout(() => finish(token), duration + 50)
     // Like V3's change event, publish every release immediately. Waiting for
     // transitionend starves both headings and the +/-2 preload window during
-    // regular quick interruptions. CSS remains the sole animation owner.
+    // regular quick interruptions. The browser owns the release interpolation.
     report()
     if (!duration) finish(token)
   }
   function point(event) {
     const points = event.touches?.length ? event.touches : event.changedTouches
-    return Array.from(points || []).find(p => !gesture || p.identifier === gesture.id)
+    const finger = points?.[0]
+    return finger && (!gesture || finger.identifier === gesture.id) ? finger : null
   }
   function start(event) {
-    if (event.touches?.length !== 1) { cancel(); return }
+    listenForMoves(true)
+    if (event.touches?.length !== 1) { grid?.reset(); cancel(); return }
     const p = point(event)
     if (!p) return
+    if (grid?.start(event, p)) return
     const interrupted = settling
     // Read the actually displayed position, not the previous target transform.
     const visible = interrupted ? visiblePosition() : position
-    stop()
-    paint(visible)
-    resetOffscreenScroll()
+    if (interrupted) {
+      stop()
+      paint(visible)
+    }
     const last = config.maxWeek - 1
     const base = visible < 0 ? -(0.25 / (0.5 + visible) - 0.5)
       : visible > last ? last + 0.25 / (0.5 - (visible - last)) - 0.5 : visible
     gesture = {
       id: p.identifier, startX: p.clientX, startY: p.clientY, x: p.clientX,
       base, lastTime: now(), velocity: 0, axis: null, interrupted,
+      sampleTime: event.timeStamp ?? now(), samplePosition: visible, trackVelocity: null,
       resume: destination
     }
     root.setAttribute('data-motion-phase', 'tracking')
   }
   function move(event) {
-    if (!gesture) return
-    if (event.touches?.length !== 1) { cancel(); return }
+    if (event.touches?.length !== 1) { grid?.reset(); cancel(); return }
     const p = point(event)
     if (!p) return
+    if (grid?.move(p)) { if (event.cancelable) event.preventDefault(); return }
+    if (!gesture) return
     const dx = p.clientX - gesture.startX, dy = p.clientY - gesture.startY
+    const distance = Math.max(Math.abs(dx), Math.abs(dy))
     if (!gesture.axis) {
-      if (Math.max(Math.abs(dx), Math.abs(dy)) < 3) return
+      if (distance < 3) return
       gesture.axis = Math.abs(dx) > Math.abs(dy) ? 'horizontal' : 'vertical'
+      if (gesture.axis === 'horizontal') resetOffscreenScroll()
     }
-    if (gesture.axis !== 'horizontal') return
+    if (gesture.axis !== 'horizontal') {
+      // After the grid hold is cancelled, a vertical swipe belongs entirely to
+      // the native scroller. It no longer needs a blocking handler on each move.
+      if (distance >= GRID_HOLD_SLOP) listenForMoves(false)
+      return
+    }
     if (event.cancelable) event.preventDefault()
     const time = now()
     const elapsed = Math.max(1, time - gesture.lastTime)
@@ -163,8 +203,26 @@ export function createStableWeekController(root, initialConfig, notify) {
     const min = preparedMin > 0 ? preparedMin : -0.5
     const max = preparedMax < config.maxWeek - 1 ? preparedMax : config.maxWeek - 0.5
     paint(Math.max(min, Math.min(max, bounded)))
+    // The rubber band and prepared-panel bounds can move less than the finger.
+    // Measure the displayed track using input timestamps, independent of frame rate.
+    const sampleTime = event.timeStamp ?? time
+    const dt = sampleTime - gesture.sampleTime
+    if (dt > 0) {
+      const measured = (position - gesture.samplePosition) * width / dt
+      const weight = 1 - Math.exp(-dt / 24)
+      gesture.trackVelocity = gesture.trackVelocity == null ? measured : gesture.trackVelocity + weight * (measured - gesture.trackVelocity)
+      gesture.sampleTime = sampleTime
+      gesture.samplePosition = position
+    }
   }
-  function end() {
+  function end(event) {
+    listenForMoves(true)
+    if (grid?.finish()) {
+      // A handled tap can open the editor under the finger. Suppress the
+      // compatibility click before it can dismiss that newly mounted sheet.
+      if (event.cancelable) event.preventDefault()
+      return
+    }
     if (!gesture) return
     const value = gesture
     gesture = null
@@ -176,7 +234,10 @@ export function createStableWeekController(root, initialConfig, notify) {
     suppressedUntil = now() + 360
     const velocity = now() - value.lastTime > 90 ? 0 : value.velocity
     const target = Math.max(preparedMin, Math.min(preparedMax, settleWeek(position, velocity, config.maxWeek)))
-    settle(target, velocity)
+    const age = Math.max(0, (event.timeStamp ?? now()) - value.sampleTime)
+    // Let a stopped finger lose its momentum before the existing 90 ms hold cutoff.
+    const retained = Math.max(0, Math.min(1, (90 - age) / 58))
+    settle(target, velocity, (value.trackVelocity ?? 0) * retained)
   }
   function cancel() {
     if (!gesture) return
@@ -191,7 +252,7 @@ export function createStableWeekController(root, initialConfig, notify) {
     finish(generation)
   }
   function click(event) {
-    if (now() >= suppressedUntil) return
+    if (!grid?.suppressClick() && now() >= suppressedUntil) return
     event.preventDefault()
     event.stopImmediatePropagation()
   }
@@ -199,6 +260,7 @@ export function createStableWeekController(root, initialConfig, notify) {
     if (destroyed || next.revision === config.revision) return
     stop()
     gesture = null
+    grid?.reset()
     config = next
     destination = reported = Math.max(0, Math.min(config.maxWeek - 1, config.week - 1))
     width = root.getBoundingClientRect().width || width
@@ -225,12 +287,33 @@ export function createStableWeekController(root, initialConfig, notify) {
     attributeFilter: ['data-calendar-panel', 'data-calendar-view'] })
   const detachObserver = new MutationObserver(() => { if (!root.isConnected) destroy() })
   if (root.ownerDocument?.body) detachObserver.observe(root.ownerDocument.body, { childList: true, subtree: true })
+  function listenForMoves(enabled) {
+    if (listeningForMoves === enabled) return
+    listeningForMoves = enabled
+    if (enabled) root.addEventListener('touchmove', move, { capture: true, passive: false })
+    else root.removeEventListener('touchmove', move, true)
+  }
+  function cancelTouch() { listenForMoves(true); grid?.reset(); cancel() }
+  function mouseDown(e) {
+    if (e.button !== 0 || !grid || e.sourceCapabilities?.firesTouchEvents) return
+    mouseEditing = true
+    if (grid.start(e, e)) e.preventDefault()
+  }
+  function mouseMove(e) { if (mouseEditing && grid?.move(e)) e.preventDefault() }
+  function mouseUp() { if (mouseEditing) grid?.finish(); mouseEditing = false }
+  if (grid) {
+    root.addEventListener('mousedown', mouseDown, true)
+    root.ownerDocument.addEventListener('mousemove', mouseMove, true)
+    root.ownerDocument.addEventListener('mouseup', mouseUp, true)
+  }
   root.addEventListener('touchstart', start, { capture: true, passive: true })
-  root.addEventListener('touchmove', move, { capture: true, passive: false })
-  root.addEventListener('touchend', end, { capture: true, passive: true })
-  root.addEventListener('touchcancel', cancel, { capture: true, passive: true })
+  listenForMoves(true)
+  root.addEventListener('touchend', end, { capture: true, passive: false })
+  root.addEventListener('touchcancel', cancelTouch, { capture: true, passive: true })
   root.addEventListener('click', click, true)
   track.addEventListener('transitionend', transitionEnd)
+  function preferenceChanged(event) { if (event.matches && settling) finish(generation) }
+  quiet?.addEventListener?.('change', preferenceChanged)
   paint(position)
   root.setAttribute('data-motion-phase', 'idle')
   function destroy() {
@@ -241,12 +324,19 @@ export function createStableWeekController(root, initialConfig, notify) {
     resizeObserver?.disconnect()
     panelObserver.disconnect()
     detachObserver.disconnect()
+    if (grid) {
+      grid.destroy()
+      root.removeEventListener('mousedown', mouseDown, true)
+      root.ownerDocument.removeEventListener('mousemove', mouseMove, true)
+      root.ownerDocument.removeEventListener('mouseup', mouseUp, true)
+    }
     root.removeEventListener('touchstart', start, true)
-    root.removeEventListener('touchmove', move, true)
+    listenForMoves(false)
     root.removeEventListener('touchend', end, true)
-    root.removeEventListener('touchcancel', cancel, true)
+    root.removeEventListener('touchcancel', cancelTouch, true)
     root.removeEventListener('click', click, true)
     track.removeEventListener('transitionend', transitionEnd)
+    quiet?.removeEventListener?.('change', preferenceChanged)
   }
-  return { configure, destroy }
+  return { configure, destroy, dismissGridAdd: () => grid?.dismissGridAdd() }
 }

@@ -2,6 +2,8 @@ import { installGlassLens } from './glass-lens.js'
 import { createHopNavigation, hopLandingSquash, landingInertiaReady, landingInertiaFrame, HOP_LANDING_COMPRESS_DURATION } from './glass-hop.js'
 import { flowMaterialFrame } from './glass-selection-material.js'
 import { createGlassTouchLight } from './glass-touch-light.js'
+import { createGlassFrameClock } from './glass-frame-clock.js'
+import { listenGlassPress } from './glass-press.js'
 
 export function tabAt(x, left, width, count = 4) { return Math.max(0, Math.min(count - 1, Math.floor((x - left) / width * count))) }
 
@@ -110,9 +112,10 @@ export function flowLandingDeformation(amount, destination, direction, count = 3
 }
 
 export function createGlassNavigation(root, initial, select) {
-  const touchLight = createGlassTouchLight(root, initial)
+  const clock = createGlassFrameClock(root.ownerDocument.defaultView)
+  const touchLight = createGlassTouchLight(root, initial, clock)
   let mode = initial.navMotion === 'hop' ? 'hop' : 'flow'
-  const create = config => mode === 'hop' ? createHopNavigation(root, config, select) : createFlowNavigation(root, config, select)
+  const create = config => mode === 'hop' ? createHopNavigation(root, config, select, clock) : createFlowNavigation(root, config, select, clock)
   let controller = create(initial)
   return {
     configure(next) {
@@ -126,7 +129,7 @@ export function createGlassNavigation(root, initial, select) {
   }
 }
 
-function createFlowNavigation(root, initial, select) {
+function createFlowNavigation(root, initial, select, clock) {
   const doc = root.ownerDocument, win = doc.defaultView
   const bar = root.querySelector('.glass-bar'), indicator = root.querySelector('.glass-selection')
   const light = root.querySelector('.glass-light')
@@ -159,7 +162,7 @@ function createFlowNavigation(root, initial, select) {
   function requestPaint() {
     if (destroyed || paintFrame) return
     lastFrame = win.performance.now()
-    paintFrame = win.requestAnimationFrame(paint)
+    paintFrame = clock.request(paint)
   }
   function writeMaterial(speed, dt = 0) {
     if (quiet()) { material = 0; materialMotion = null }
@@ -216,7 +219,7 @@ function createFlowNavigation(root, initial, select) {
     materialMotion = {from:material, held, start:win.performance.now(), distance:Math.abs(position.value - target) * tabWidth}
   }
   function halt() {
-    win.cancelAnimationFrame(paintFrame); paintFrame = 0
+    clock.cancel(paintFrame); paintFrame = 0
     press = null
     root.classList.remove('is-pressed', 'is-dragging')
     target = config.activeIndex
@@ -315,7 +318,7 @@ function createFlowNavigation(root, initial, select) {
     const lightMoving = !press && pressure.value > 0 && (lightX.value !== centerX || lightY.value !== centerY || lightX.velocity !== 0 || lightY.velocity !== 0)
     indicator.style.setProperty('--glass-reflection-angle', `${145 + Math.max(-1,Math.min(1,(lightX.value-centerX)/tabWidth))*28}deg`)
     if ((!quiet() && moving) || tailMoving || shapeMoving || lightMoving || (!press?.dragged && (position.value !== target || position.velocity !== 0)) || pressure.value !== pressureTarget || pressure.velocity !== 0) {
-      paintFrame = win.requestAnimationFrame(paint)
+      paintFrame = clock.request(paint)
     }
   }
   function finishPress(event, cancel = false) {
@@ -385,10 +388,7 @@ function createFlowNavigation(root, initial, select) {
     beginMaterial(false)
     requestPaint(); select(target)
   }
-  listen(root, 'pointerdown', onPointerDown, {passive:true})
-  listen(doc, 'pointermove', onPointerMove, {passive:true})
-  listen(doc, 'pointerup', event => finishPress(event), {passive:true})
-  listen(doc, 'pointercancel', event => finishPress(event, true), {passive:true})
+  listenGlassPress(root, listen, onPointerDown, onPointerMove, finishPress, initial.allowPagePan)
   listen(root, 'click', onClick)
   listen(win, 'resize', resize, {passive:true})
   listen(win, 'blur', halt)
@@ -423,7 +423,7 @@ function createFlowNavigation(root, initial, select) {
     suspend:halt,
     destroy() {
       destroyed = true
-      win.cancelAnimationFrame(paintFrame)
+      clock.cancel(paintFrame)
       listeners.forEach(remove => remove())
       resizeObserver?.disconnect()
       lens.destroy()

@@ -34,7 +34,7 @@ npm run build:app
 
 `build:app` 只生成资源，不是完整 APK；HBuilderX 发行时仍选中 UCAS 主工程。不要把 `src` 或 `dist/build/app` 单独打开为新的发行工程。
 
-当前 `src/manifest.json` 版本为 `0.1.0` / `1`，可保留做本次集成验证。正式升级发布时，在该源码文件增加版本号，例如 `0.1.1` / `2`，保存后重新构建打包；包名、AppID 和签名沿用原值。
+1.0.0 的 Android 版本号为 `2`。后续发版时更新 `src/manifest.json` 的 `versionName` 并递增 `versionCode`，同步 npm 版本后重新打包。覆盖安装沿用现有包名、AppID 和签名。
 
 ## 3. 移走实际原生壳缓存
 
@@ -90,7 +90,13 @@ Set-Location C:/Users/FanYulong/Desktop/UCAS_Course_Schedule
 Package identity, signing, widget components, DEX classes and resources passed static inspection.
 ```
 
-报告位于 `.artifacts/widget-apk-verification.json`，`passed` 必须为 true。检查覆盖包名、原生版本、两款 Provider、Service/Activity、真实 DEX 定义、Worker 父类、布局和明日按钮、内置 App 页面、非调试标志及签名。通过后再安装。
+报告位于 `.artifacts/widget-apk-verification.json`。检查覆盖包名、原生接口版本 5、两款 Provider、上下课闹钟接收器及权限、Service/Activity、DEX 类、布局、内置页面、正式包标志及签名。选择 `passed` 为 true 的 APK 覆盖安装。
+
+### 生成 GitHub Release 更新清单
+
+发布到 GitHub 时，先将通过验收的 APK 命名为英文文件名，例如 `LakesideSchedule-1.0.0.apk`。对该文件运行上面的验证命令并追加 `-WriteUpdateManifest`。脚本会核对 APK 内的版本、包名和签名，然后在 APK 旁生成含文件名和 SHA-256 的 `update.json`。
+
+在 GitHub 创建正式 Release，标签使用 `v1.0.0`（后续与当次版本名对应），正文填写面向用户的更新说明。先在草稿中上传该 APK 和配套的 `update.json`，再发布并设为 Latest。应用读取同一 Release 的两个附件，使用 Android 内部版本号判断是否可更新。
 
 ## 6. 覆盖安装与手机验收
 
@@ -99,9 +105,16 @@ Package identity, signing, widget components, DEX classes and resources passed s
 1. 设置 → 桌面小组件：可以添加两款组件；标题右侧提示图标可查看手动添加方法。
 2. 点击重新同步，确认真实课表同步成功。
 3. 添加宽松版、紧凑版；荣耀进入“桌面卡片 → 经典小工具”。
-4. 删除旧实例后重新添加：检查两款组件默认尽量铺满桌面宽度，宽松版默认 3 行、可以纵向拉伸，紧凑版默认 1 行最多两堂，两行最多四堂；继续拉高容量按 2/4/6/8… 递增，高度调整不改变宽度。再检查行高、已结束名称划线、今日/明日切换及点击进入整周课表。
+4. 删除旧实例后重新添加：检查两款组件默认尽量铺满桌面宽度，宽松版默认 3 行、可以纵向拉伸，紧凑版默认 1 行最多两堂，两行最多四堂；继续拉高容量按 2/4/6/8… 递增，高度调整不改变宽度。再检查行高、已结束名称划线、宽松版今日/明日切换及点击进入整周课表。紧凑版可自动显示跨天课程，顶部没有明日切换按钮。
 5. 断开电脑、关闭 App 页面、断网后手动刷新，课程仍应正常显示。
-6. 观察周期刷新，接受省电延迟，不要求每 15 分钟或上下课准点刷新。
+6. 确认课表中有后续课程，在「设置 → 桌面小组件」记下「下次预约刷新」，回到桌面。在上课时检查状态灯，在下课时检查剩余堂数及两款卡片的排序。记录系统是否允许精确闹钟和卡片实际更新时间。下一次预约应指向下一个有效的课程起止时间。
+
+连接手机时，可用以下两条只读命令核实系统的预约和实际送达。安装后的首个 `Course alarm armed` 表示系统接收了预约。到点后的 `Course boundary rendered` 包含实际处理时间及成功提交的卡片数量。若新 APK 的检查通过而手机上尚无预约，先用 `adb shell pm path ucas.course.schedule` 和安装文件的 SHA-256 核实运行的版本。
+
+```powershell
+adb shell dumpsys alarm | Select-String 'ucas.course.schedule.widget.COURSE_BOUNDARY'
+adb logcat -d -s LakesideWidget:I | Select-String 'Course alarm armed|Course boundary rendered|Could not register'
+```
 
 签名不一致时保留手机现有安装和数据，核对原证书后重新打包。
 

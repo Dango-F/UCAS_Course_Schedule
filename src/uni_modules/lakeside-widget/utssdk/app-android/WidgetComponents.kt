@@ -10,44 +10,20 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.PeriodicWorkRequest
-import androidx.work.WorkManager
-import androidx.work.Worker
-import androidx.work.WorkerParameters
 import androidx.annotation.Keep
 import org.json.JSONObject
 import java.util.UUID
-import java.util.concurrent.TimeUnit
 
 internal object WidgetUpdates {
-    private const val WORK = "lakeside-widget-refresh-v1"
     private val RENDER_LOCK = Any()
-    private fun manager(context: Context): WorkManager {
-        return try { WorkManager.getInstance(context) } catch (_: IllegalStateException) {
-            synchronized(this) {
-                try { WorkManager.getInstance(context) } catch (_: IllegalStateException) {
-                    WorkManager.initialize(context, androidx.work.Configuration.Builder().build())
-                    WorkManager.getInstance(context)
-                }
-            }
-        }
-    }
-    fun schedule(context: Context) {
-        try {
-            val work = manager(context)
-            if (WidgetRepository(context).instances().isEmpty()) work.cancelUniqueWork(WORK)
-            else work.enqueueUniquePeriodicWork(WORK, ExistingPeriodicWorkPolicy.KEEP,
-                PeriodicWorkRequest.Builder(WidgetRefreshWorker::class.java, 15, TimeUnit.MINUTES).build())
-        } catch (_: Exception) { Log.w("LakesideWidget", "Periodic refresh could not be scheduled") }
-    }
-    // A periodic worker and a day-preview tap may run concurrently. Submit whole frames in order.
-    fun refreshOne(context: Context, id: Int, kind: String, now: Long = System.currentTimeMillis(), sizeOptions: Bundle? = null, shouldSubmit: () -> Boolean = { true }): Unit = synchronized(RENDER_LOCK) {
+    // Keep the frame and legacy list contents in sync.
+    fun refreshOne(context: Context, id: Int, kind: String, now: Long = System.currentTimeMillis(), sizeOptions: Bundle? = null,
+                   cache: Pair<WidgetSnapshot?, String>? = null, shouldSubmit: () -> Boolean = { true }): Unit = synchronized(RENDER_LOCK) {
         if (!shouldSubmit()) return@synchronized
         val repo = WidgetRepository(context)
-        val (snapshot, state) = repo.read()
+        val (snapshot, state) = cache ?: repo.read()
         val renderer = WidgetRenderer(context)
-        val selection = WidgetSelector.select(snapshot, state, now, repo.dayOffset(id, now))
+        val selection = WidgetSelector.select(snapshot, state, now, repo.dayOffset(id, kind, now))
         val options = repo.options(id, kind)
         if (kind == "large" && android.os.Build.VERSION.SDK_INT < 31) repo.saveFrame(id, snapshot, selection.today, options, now)
         val view = renderer.render(id, kind, snapshot, selection, options, now, sizeOptions)
@@ -58,25 +34,32 @@ internal object WidgetUpdates {
             AppWidgetManager.getInstance(context).notifyAppWidgetViewDataChanged(id, renderer.id("ls_widget_list"))
         }
     }
-    fun refreshAll(context: Context): Boolean {
-        var ok = true
+    fun reconcile(context: Context, refresh: Boolean = false, delivered: Long? = null): Boolean {
+        val repo = WidgetRepository(context)
+        val widgets = repo.instances()
+        val cache = if (widgets.isEmpty()) null else repo.read()
         val now = System.currentTimeMillis()
-        WidgetRepository(context).instances().forEach { (id, kind) ->
-            try { refreshOne(context, id, kind, now) } catch (_: Exception) { ok = false; Log.w("LakesideWidget", "Widget rendering failed") }
+        val previous = WidgetCourseAlarm.scheduledAt(context)
+        val plan = WidgetCourseBoundaries.update(cache?.first, previous, delivered, now) ?: return true
+        val registered = WidgetCourseAlarm.replace(context, previous, plan.nextAt)
+        if (delivered == null) WidgetCourseAlarm.cancelLegacyWork(context)
+        if (!refresh && !plan.refreshDue) return registered
+        var submitted = 0
+        widgets.forEach { (id, kind) ->
+            try {
+                refreshOne(context, id, kind, now, cache = cache)
+                submitted++
+            } catch (error: Exception) { Log.w("LakesideWidget", "Widget rendering failed id=$id", error) }
         }
-        schedule(context)
-        return ok
+        if (plan.refreshDue) Log.i("LakesideWidget", "Course boundary rendered at=$now delivered=$delivered widgets=$submitted/${widgets.size}")
+        return registered
     }
-}
-@Keep
-class WidgetRefreshWorker(context: Context, parameters: WorkerParameters) : Worker(context, parameters) {
-    override fun doWork(): Result = if (WidgetUpdates.refreshAll(applicationContext)) Result.success() else Result.retry()
 }
 abstract class LakesideWidgetProvider : AppWidgetProvider() {
     abstract val kind: String
     private fun update(context: Context) {
         val pending = goAsync()
-        LakesideWidgetBridge.executor.execute { try { WidgetUpdates.refreshAll(context.applicationContext) } finally { pending.finish() } }
+        LakesideWidgetBridge.executor.execute { try { WidgetUpdates.reconcile(context.applicationContext, refresh = true) } finally { pending.finish() } }
     }
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { update(context) }
     override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, options: Bundle) {
@@ -95,13 +78,23 @@ abstract class LakesideWidgetProvider : AppWidgetProvider() {
             finally { WidgetResizeRequests.finish(id, token); pending.finish() }
         }
     }
-    override fun onEnabled(context: Context) { WidgetUpdates.schedule(context) }
-    override fun onDeleted(context: Context, ids: IntArray) { ids.forEach { WidgetResizeRequests.cancel(it); WidgetRepository(context).remove(it) }; WidgetUpdates.schedule(context) }
-    override fun onDisabled(context: Context) { WidgetUpdates.schedule(context) }
+    override fun onDeleted(context: Context, ids: IntArray) {
+        val repo = WidgetRepository(context)
+        ids.forEach {
+            WidgetResizeRequests.cancel(it)
+            repo.remove(it)
+        }
+        val pending = goAsync()
+        LakesideWidgetBridge.executor.execute {
+            try { WidgetUpdates.reconcile(context.applicationContext) }
+            finally { pending.finish() }
+        }
+    }
     // AppWidgetProvider.onReceive follows onRestored with onUpdate; call goAsync only once.
     override fun onRestored(context: Context, oldIds: IntArray, newIds: IntArray) { WidgetRepository(context).restore(oldIds, newIds) }
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == "${context.packageName}.widget.DAY") {
+            if (kind != "large") return
             val id = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
             val offset = intent.getIntExtra("dayOffset", -1)
             if (offset !in 0..1) return
@@ -129,14 +122,17 @@ class SmallWidgetProvider : LakesideWidgetProvider() { override val kind = "smal
 class WidgetPinReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pending = goAsync()
-        LakesideWidgetBridge.executor.execute { try { WidgetUpdates.refreshAll(context.applicationContext) } finally { pending.finish() } }
+        LakesideWidgetBridge.executor.execute { try { WidgetUpdates.reconcile(context.applicationContext, refresh = true) } finally { pending.finish() } }
     }
 }
 @Keep
 class WidgetEnvironmentReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val pending = goAsync()
-        LakesideWidgetBridge.executor.execute { try { WidgetUpdates.refreshAll(context.applicationContext) } finally { pending.finish() } }
+        LakesideWidgetBridge.executor.execute {
+            try { WidgetUpdates.reconcile(context.applicationContext, refresh = true) }
+            finally { pending.finish() }
+        }
     }
 }
 @Keep
@@ -176,13 +172,15 @@ class WidgetCollectionService : RemoteViewsService() {
             // including across midnight and process death, rather than sampling a second clock here.
             val frame = repo.frame(widgetId)
             if (frame != null) {
-                courses = frame.first.courses
-                options = frame.second; now = frame.third
+                now = frame.third
+                courses = WidgetSelector.largeCourses(frame.first.courses, now)
+                options = frame.second
                 return
             }
             val (snapshot, state) = repo.read()
             now = System.currentTimeMillis()
-            courses = WidgetSelector.select(snapshot, state, now, repo.dayOffset(widgetId, now)).today
+            val selection = WidgetSelector.select(snapshot, state, now, repo.dayOffset(widgetId, "large", now))
+            courses = WidgetSelector.largeCourses(selection.today, now)
             options = repo.options(widgetId, "large")
         }
         override fun onDestroy() { courses = emptyList() }

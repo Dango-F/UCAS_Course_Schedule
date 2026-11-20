@@ -23,7 +23,8 @@ export function createNavigationAnchor(root) {
     if (!disposed && !frame) frame = win.requestAnimationFrame(update)
   }
   const observer = win.ResizeObserver ? new win.ResizeObserver(schedule) : null
-  for (const element of [canvas, header, heading]) observer?.observe(element)
+  // Status-bar insets change the header padding without changing its content box.
+  for (const element of [canvas, header, heading]) observer?.observe(element, { box:'border-box' })
   win.addEventListener('resize', schedule)
   win.visualViewport?.addEventListener('resize', schedule)
   update()

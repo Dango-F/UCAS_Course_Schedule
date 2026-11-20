@@ -106,27 +106,30 @@ async function main() {
     await click('.glass-wake');await sleep(250);
     const renderer=await evaluate("document.querySelector('#liquid-nav-root').dataset.glassRenderer");
     assert.equal(renderer,'svg-refraction');
-    const material=await evaluate("(()=>{const s=getComputedStyle(document.querySelector('.glass-surface')),selection=document.querySelector('.glass-selection > uni-view, .glass-selection > view');return {filter:s.backdropFilter,surface:s.backgroundColor,selectionImage:getComputedStyle(selection).backgroundImage,selection:getComputedStyle(selection,'::before').backgroundColor,foreground:getComputedStyle(document.querySelector('.nav-item')).color}})()");
-    assert.match(material.filter,/blur\(0\.2px\)/,'view-layer inline filter uses the clear blur too');
-    assert.equal(material.surface,'rgba(250, 250, 252, 0.02)');
+    const material=await evaluate("(()=>{const s=getComputedStyle(document.querySelector('.glass-surface')),selection=document.querySelector('.glass-selection > uni-view, .glass-selection > view');return {filter:s.backdropFilter,surface:s.backgroundColor,surfaceAlpha:Number(s.getPropertyValue('--glass-surface-alpha')),selectionImage:getComputedStyle(selection).backgroundImage,selection:getComputedStyle(selection,'::before').backgroundColor,selectionAlpha:Number(getComputedStyle(selection).getPropertyValue('--glass-selection-alpha')),foreground:getComputedStyle(document.querySelector('.nav-item')).color}})()");
+    assert.match(material.filter,/blur\(0\.71px\)/,'default clarity applies the calibrated background blur');
+    assert.match(material.surface,/^rgba\(250, 250, 252, /);
+    assert.ok(Math.abs(material.surfaceAlpha-.071875)<.0001);
     assert.match(material.selectionImage,/linear-gradient/,'selection capsule keeps its translucent gradient surface');
     assert.match(material.selectionImage,/255, 255, 255/,'selection capsule gradient keeps the original white tint');
-    assert.equal(material.selection,'rgba(227, 227, 227, 0.024)');
+    assert.match(material.selection,/^rgba\(227, 227, 227, /);
+    assert.ok(Math.abs(material.selectionAlpha-.04375)<.0001);
     assert.equal(material.foreground,'rgb(32, 33, 38)');
-    checks.push('default 100 material: 0.2px blur, 2% surface veil, original white translucent selection gradient with E3E3E3 tint, graphite foreground');
+    checks.push('75 clarity by default with 0.71px backdrop blur, a translucent surface and the E3E3E3 selection tint');
     const lensImage=await evaluate("document.querySelector('#liquid-nav-root > svg feImage').getAttribute('href')");
-    assert.ok(Math.abs(await evaluate("Number(document.querySelector('#liquid-nav-root > svg feDisplacementMap').getAttribute('scale'))")-56*20/36)<.001);
+    const optics=await import('data:text/javascript;base64,'+fs.readFileSync('src/components/glass-spectrum.js').toString('base64'));
+    const foldedScale=optics.opticalMapScale(56*5/36,true,true);
+    assert.ok(Math.abs(await evaluate("Number(document.querySelector('#liquid-nav-root > svg feDisplacementMap').getAttribute('scale'))")-foldedScale)<.001);
     await shot('resident-course');
     checks.push('three tabs, compact 56px geometry, idle hide and accessible wake, no idle frame loop');
 
-    // This script covers the legacy flow controller. The product default is
-    // now hop, so opt into flow before exercising its spring-specific gesture
-    // assertions; the dedicated nav-hop script covers the default mode.
+    // Exercise the optional elastic gestures in the default flow mode.
     await click('[data-nav-index="2"]');
     await waitFor("Boolean(document.querySelector('[data-settings-entry=\"appearance\"]'))");
     await click('[data-settings-entry="appearance"]');
     await waitFor("Boolean(document.querySelector('[data-nav-motion=\"flow\"]'))");
-    await click('[data-nav-motion="flow"]');
+    assert.equal(await evaluate("document.querySelector('[data-nav-motion=\"flow\"]').getAttribute('aria-pressed')"),'true');
+    await click('[data-q-elastic]');
     await sleep(120);
     // Detail pages intentionally hide/inert the shared navigation. Return to
     // the settings root before testing physical touches on the legacy mode.
@@ -238,7 +241,7 @@ async function main() {
     await shot('course-backdrop');
     // Same course, scroll position and optics: only restore the previous coatings
     // and blur temporarily for an honest before/after visual comparison.
-    await evaluate("(()=>{const s=document.createElement('style');s.id='previous-glass-material';s.textContent='.glass-surface { background:rgba(250,250,252,.19) !important; backdrop-filter:'+document.querySelector('.glass-surface').style.backdropFilter.replace('blur(0.2px)','blur(1.94px)')+' !important; } .glass-selection > uni-view,.glass-selection > view { background:linear-gradient(155deg,#ffffff30,#ffffff00 55%) !important; } .glass-selection > uni-view::before,.glass-selection > view::before { background:rgba(52,53,65,.085) !important; }';document.head.appendChild(s)})()");
+    await evaluate("(()=>{const s=document.createElement('style');s.id='previous-glass-material';const previous=document.querySelector('.glass-surface').style.backdropFilter.replace(/blur\\([^)]*\\)/,'blur(1.94px)');s.textContent='.glass-surface { background:rgba(250,250,252,.19) !important; backdrop-filter:'+previous+' !important; } .glass-selection > uni-view,.glass-selection > view { background:linear-gradient(155deg,#ffffff30,#ffffff00 55%) !important; } .glass-selection > uni-view::before,.glass-selection > view::before { background:rgba(52,53,65,.085) !important; }';document.head.appendChild(s)})()");
     await sleep(180); await shot('course-backdrop-before');
     await evaluate("document.querySelector('#previous-glass-material').remove()");
     await sleep(180);

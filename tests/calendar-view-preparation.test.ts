@@ -11,9 +11,9 @@ describe('bounded calendar view preparation', () => {
     preparation.sync(3, 'grid', [1, 2, 3, 4, 5])
     return { ...preparation, publish, views: () => views }
   }
-  it('switches only the current week immediately, then one nearest neighbour per task', () => {
+  it('prepares the adjacent weeks during motion and the distant weeks after it settles', () => {
     const f = fixture()
-    f.sync(3, 'list', [1, 2, 3, 4, 5])
+    const revision = f.sync(3, 'list', [1, 2, 3, 4, 5])
     expect(Object.values(f.views()).filter(view => view.active === 'list')).toHaveLength(1)
     expect(f.views()[3]).toEqual({ active: 'list', grid: true, list: true })
     vi.advanceTimersByTime(48)
@@ -21,9 +21,36 @@ describe('bounded calendar view preparation', () => {
     expect(f.views()[4].active).toBe('grid')
     vi.advanceTimersByTime(48)
     expect(f.views()[4].active).toBe('list')
-    vi.runAllTimers()
+    vi.advanceTimersByTime(400)
+    expect([f.views()[1].active, f.views()[5].active]).toEqual(['grid', 'grid'])
+    f.settle({ week: 3, mode: 'list', revision })
+    vi.advanceTimersByTime(48)
+    expect([f.views()[1].active, f.views()[5].active]).toEqual(['list', 'grid'])
+    vi.advanceTimersByTime(48)
     expect(Object.values(f.views()).every(view => view.active === 'list')).toBe(true)
     expect(Object.values(f.views()).reduce((count, view) => count + Number(view.grid) + Number(view.list), 0)).toBe(6)
+    f.dispose()
+  })
+  it('ignores an old completion for the same week and mode after two reversals', () => {
+    const f = fixture()
+    const weeks = [1, 2, 3, 4, 5]
+    const stale = f.sync(3, 'list', weeks)
+    f.sync(3, 'grid', weeks)
+    const revision = f.sync(3, 'list', weeks)
+    f.settle({ week: 3, mode: 'list', revision: stale })
+    f.settle({ week: 3, mode: 'grid', revision })
+    vi.advanceTimersByTime(300)
+    expect(f.views()[1].active).toBe('grid')
+    f.settle({ week: 3, mode: 'list', revision })
+    vi.advanceTimersByTime(96)
+    expect(f.views()[5].active).toBe('list')
+    f.dispose()
+  })
+  it('prepares all neighbours without waiting when motion is disabled', () => {
+    const f = fixture()
+    f.sync(3, 'list', [1, 2, 3, 4, 5], false)
+    vi.advanceTimersByTime(192)
+    expect(Object.values(f.views()).every(view => view.active === 'list')).toBe(true)
     f.dispose()
   })
   it('reuses current-week views and cancels stale work during rapid toggles', () => {
@@ -53,7 +80,7 @@ describe('bounded calendar view preparation', () => {
     f.sync(3, 'list', [1, 2, 3, 4, 5])
     f.sync(20, 'list', [18, 19, 20])
     expect(Object.keys(f.views())).toEqual(['20'])
-    vi.runAllTimers()
+    vi.advanceTimersByTime(96)
     expect(Object.keys(f.views())).toEqual(['18', '19', '20'])
     f.dispose()
   })

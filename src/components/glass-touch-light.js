@@ -6,7 +6,7 @@ import { paintRippleField, blendRipplePixels, rippleAlive, rippleEnvelope, advan
  */
 export const GLASS_TOUCH_LIGHT_ENABLED = true
 
-export function createGlassTouchLight(root, initial = {}) {
+export function createGlassTouchLight(root, initial, clock) {
   const noop = {configure(){},suspend(){},destroy(){}}
   const layer = root.querySelector('.glass-touch-light')
   const sheen = layer?.querySelector('.glass-touch-sheen')
@@ -27,7 +27,8 @@ export function createGlassTouchLight(root, initial = {}) {
   let targetPixels=null,pixelMemory=null
   layer.dataset.effect = 'wide-ribbon-v12'
   const quiet = () => config.touchLight === false || config.reducedMotion || preference.matches || root.dataset.glassTouchLight === 'off'
-  const blocked = () => doc.hidden || root.hasAttribute('inert') || root.dataset.navigationHidden === 'true'
+  const hidden = () => doc.hidden || root.dataset.navigationHidden === 'true' || root.dataset.navIdle === 'true'
+  const blocked = () => doc.hidden || root.dataset.navigationHidden === 'true' || root.hasAttribute('inert')
   function listen(target,type,fn,options) {
     target.addEventListener(type,fn,options)
     listeners.push(()=>target.removeEventListener(type,fn,options))
@@ -39,7 +40,7 @@ export function createGlassTouchLight(root, initial = {}) {
     if (layer.dataset.active !== active) layer.dataset.active = active
   }
   function suspend() {
-    win.cancelAnimationFrame(frame); frame = 0; contact = null
+    clock.cancel(frame); frame = 0; contact = null
     alpha = 0;waves=[]
     pixelMemory?.fill(0);targetPixels?.fill(0)
     if(drawn){context.clearRect(0,0,canvas.width,canvas.height);drawn=false}
@@ -55,7 +56,7 @@ export function createGlassTouchLight(root, initial = {}) {
   function tick(now) {
     frame = 0
     if (disposed) return
-    if (quiet() || blocked() || root.dataset.navIdle === 'true') { suspend(); return }
+    if (quiet() || hidden()) { suspend(); return }
     const dt = Math.min(64,Math.max(0,now-lastFrame)); lastFrame = now
     waves=waves.filter(w=>rippleAlive(w,now))
     for(const wave of waves)wave.flowAge=advanceFlowAge(wave.flowAge,dt)
@@ -71,11 +72,11 @@ export function createGlassTouchLight(root, initial = {}) {
       if(!drawn)pixelMemory.fill(0)
     }
     render()
-    if (waves.length || drawn || alpha!==wantedAlpha) frame=win.requestAnimationFrame(tick)
+    if (waves.length || drawn || alpha!==wantedAlpha) frame=clock.request(tick)
   }
   function request() {
     if (disposed || frame) return
-    lastFrame=win.performance.now(); frame=win.requestAnimationFrame(tick)
+    lastFrame=win.performance.now(); frame=clock.request(tick)
   }
   function begin(point,source,target) {
     if (disposed || contact || quiet() || blocked()) return
@@ -160,7 +161,8 @@ export function createGlassTouchLight(root, initial = {}) {
   listen(doc,'visibilitychange',()=>{if(doc.hidden)suspend()})
   preference.addEventListener?.('change',suspend)
   const observer=new win.MutationObserver(()=>{
-    if(quiet()||blocked()||root.dataset.navIdle==='true')suspend()
+    if(quiet() || hidden()) suspend()
+    else if(root.hasAttribute('inert') && contact) finish(null,contact.source)
   })
   observer.observe(root,{attributes:true,attributeFilter:['inert','data-navigation-hidden','data-nav-idle','data-glass-touch-light']})
   initializeBitmap();render()

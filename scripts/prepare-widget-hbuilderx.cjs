@@ -16,7 +16,7 @@ if (!fs.existsSync(icons)) throw new Error('Missing app icons: ' + icons);
 fs.cpSync(icons, path.join(output, 'unpackage', 'res', 'icons'), { recursive: true });
 const launchArt = path.join(root, 'unpackage', 'res', 'splash');
 if (fs.existsSync(launchArt)) fs.cpSync(launchArt, path.join(output, 'unpackage', 'res', 'splash'), { recursive: true });
-fs.writeFileSync(path.join(output, 'package.json'), JSON.stringify({ name: 'lakeside-widget-hbuilderx-build', private: true, version: '0.1.0', dependencies: { pinia: '2.1.7', vue: '3.4.21' } }, null, 2));
+fs.writeFileSync(path.join(output, 'package.json'), JSON.stringify({ name: 'lakeside-widget-hbuilderx-build', private: true, version: require('../src/manifest.json').versionName, dependencies: { pinia: '2.1.7', vue: '3.4.21' } }, null, 2));
 fs.writeFileSync(path.join(output, 'README.md'), '# Generated HBuilderX source project\n\nOpen this directory in HBuilderX 5.26 or compatible newer version. Install dependencies, then choose Android + release package + traditional cloud packaging (or custom debug base for debugging), with your existing package/signing settings. This projection is a diagnostic route; the current release workflow uses the maintained CLI project directly with safe packaging. Do not edit this generated copy; prepare a new build after changing src/. Verify the resulting APK with scripts/verify-widget-apk.ps1 in the maintained workspace before installing or distributing.\n');
 // Record exactly which native sources/resources were supplied to this build.
 // These hashes describe build inputs; they are not a claim that cloud compilation succeeded.

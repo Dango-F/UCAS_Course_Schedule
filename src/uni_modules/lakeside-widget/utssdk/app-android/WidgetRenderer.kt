@@ -65,12 +65,11 @@ internal class WidgetRenderer(private val context: Context) {
     private fun courseExtras(course: WidgetCourse): Intent = Intent().apply {
         putExtra("target", "calendar"); putExtra("date", course.date)
     }
-    private fun dayToggle(view: RemoteViews, widgetId: Int, kind: String, tomorrow: Boolean) {
+    private fun dayToggle(view: RemoteViews, widgetId: Int, tomorrow: Boolean) {
         text(view, "ls_widget_day", if (tomorrow) "今日" else "明日")
         view.setContentDescription(id("ls_widget_day"), if (tomorrow) "返回今日课程" else "查看明日课程")
-        val provider = if (kind == "large") LargeWidgetProvider::class.java else SmallWidgetProvider::class.java
         val offset = if (tomorrow) 0 else 1
-        val intent = Intent(context, provider).apply {
+        val intent = Intent(context, LargeWidgetProvider::class.java).apply {
             action = "${context.packageName}.widget.DAY"
             data = Uri.parse("lakeside-widget://day/$widgetId/$offset")
             putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
@@ -91,35 +90,38 @@ internal class WidgetRenderer(private val context: Context) {
     private fun smallSpacingCap(): Int = (dimension("ls_widget_small_spacing_cap") / context.resources.displayMetrics.density).roundToInt()
     fun render(widgetId: Int, kind: String, snapshot: WidgetSnapshot?, selection: WidgetSelection, options: WidgetOptions, now: Long, sizeOptions: Bundle? = null): RemoteViews {
         val sizing = sizeOptions ?: AppWidgetManager.getInstance(context).getAppWidgetOptions(widgetId)
-        val minimumHeight = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, if (kind == "small") 48 else 180)
-        val maximumHeight = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, minimumHeight)
-        val minimumWidth = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 250).coerceAtLeast(1)
-        val maximumWidth = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, minimumWidth).coerceAtLeast(1)
-        if (kind == "small" && Build.VERSION.SDK_INT >= 31) {
+        val landscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val reportedMinHeight = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT).takeIf { it > 0 }
+        val reportedMaxHeight = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT).takeIf { it > 0 }
+        val reportedMinWidth = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH).takeIf { it > 0 }
+        val reportedMaxWidth = sizing.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH).takeIf { it > 0 }
+        val defaultHeight = if (kind == "small") SmallWidgetSizing.ONE_ROW_HEIGHT.toInt() else 180
+        val heights = listOfNotNull(reportedMinHeight, reportedMaxHeight)
+        val widths = listOfNotNull(reportedMinWidth, reportedMaxWidth)
+        val minimumHeight = (heights.minOrNull() ?: defaultHeight).toFloat()
+        val maximumHeight = (heights.maxOrNull() ?: defaultHeight).toFloat()
+        val minimumWidth = (widths.minOrNull() ?: 250).toFloat()
+        val maximumWidth = (widths.maxOrNull() ?: 250).toFloat()
+        fun renderSize(height: Float, width: Float) = renderAtSize(widgetId, kind, snapshot, selection, options, now, height, width)
+        if (kind != "small") return renderSize(if (landscape) minimumHeight else maximumHeight, minimumWidth)
+        if (Build.VERSION.SDK_INT >= 31) {
             @Suppress("DEPRECATION")
             val sizes = runCatching { sizing.getParcelableArrayList<android.os.Parcelable>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
-                ?.filterIsInstance<SizeF>()?.filter { it.width.isFinite() && it.height.isFinite() && it.width > 0 && it.height > 0 }?.distinct()?.take(16) }.getOrNull()
-            // Width is fixed by the widget. Use the narrowest reported width
-            // for measurement and let text reflow when the host is wider. A
-            // single width avoids conflicting size/area choices while dragging
-            // and leaves Android's 16-frame budget for height breakpoints.
-            val width = sizes?.minOfOrNull { it.width } ?: minimumWidth.toFloat()
+                ?.filterIsInstance<SizeF>()?.filter { it.width.isFinite() && it.height.isFinite() && it.width > 0 && it.height > 0 } }.getOrNull().orEmpty()
+            val textWidth = sizes.minOfOrNull { it.width } ?: minimumWidth
+            val reportedHeight = if (landscape) sizes.minOfOrNull { it.height } ?: minimumHeight
+                else sizes.maxOfOrNull { it.height } ?: maximumHeight
             val screenHeight = context.resources.displayMetrics.let { it.heightPixels / it.density }
-            val extent = maxOf(screenHeight, maximumHeight.toFloat(), sizes?.maxOfOrNull { it.height } ?: 0f)
-            val heights = SmallWidgetSizing.responsiveHeights(smallSpacingCap().toFloat(), extent)
-            return RemoteViews(heights.associate { height ->
-                SizeF(width, height) to renderAtSize(widgetId, kind, snapshot, selection, options, now, height, width)
+            val extent = maxOf(screenHeight, maximumHeight, sizes.maxOfOrNull { it.height } ?: 0f)
+            val frames = SmallWidgetSizing.responsiveFrames(smallSpacingCap().toFloat(), extent, reportedHeight)
+            // The minimum width is only a fit constraint. Measure the course text
+            // using the host's width, independently of its height breakpoint.
+            return RemoteViews(frames.associate { frame ->
+                SizeF(frame.minWidth, frame.minHeight) to renderSize(frame.layoutHeight, textWidth)
             })
         }
-        // Launchers without exact sizes expose portrait/landscape bounds. Supply
-        // both layouts so rotating does not leave a stale course capacity.
-        if (kind == "small") return RemoteViews(
-            renderAtSize(widgetId, kind, snapshot, selection, options, now, minimumHeight.toFloat(), maximumWidth.toFloat()),
-            renderAtSize(widgetId, kind, snapshot, selection, options, now, maximumHeight.toFloat(), minimumWidth.toFloat())
-        )
-        val height = if (context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) minimumHeight
-            else maximumHeight
-        return renderAtSize(widgetId, kind, snapshot, selection, options, now, height.toFloat(), minimumWidth.toFloat())
+        // Android 6–11 exposes only the portrait/landscape bounds.
+        return RemoteViews(renderSize(minimumHeight, maximumWidth), renderSize(maximumHeight, minimumWidth))
     }
     private fun renderAtSize(widgetId: Int, kind: String, snapshot: WidgetSnapshot?, selection: WidgetSelection, options: WidgetOptions, now: Long, height: Float, width: Float): RemoteViews {
         val short = height < 140
@@ -127,7 +129,7 @@ internal class WidgetRenderer(private val context: Context) {
             kind == "large" -> "ls_widget_large"
             height >= smallSpacingCap() -> "ls_widget_small_capped"
             height >= 140 -> "ls_widget_small"
-            height >= 78 -> "ls_widget_small_compact"
+            height >= SmallWidgetSizing.ONE_ROW_HEIGHT -> "ls_widget_small_compact"
             height >= 62 -> "ls_widget_small_medium"
             else -> "ls_widget_small_dense"
         }
@@ -137,7 +139,7 @@ internal class WidgetRenderer(private val context: Context) {
             val capped = height >= smallSpacingCap()
             val capacity = if (capped) SmallWidgetSizing.candidateLimit(height, smallSpacingCap().toFloat()) else if (short) 2 else 4
             val candidates = WidgetSelector.smallCourses(snapshot, selection, now, capacity)
-            val fitted = if (capped) fittingSmallCourses(candidates, selection, options, tomorrow, height, width) else candidates
+            val fitted = if (capped) fittingSmallCourses(candidates, selection, options, height, width) else candidates
             val count = SmallWidgetSizing.visibleCount(height, candidates.size, fitted.size)
             smallCourses = candidates.take(count)
             // Long names/date labels may wrap at normal two-row sizes. Reuse
@@ -169,7 +171,7 @@ internal class WidgetRenderer(private val context: Context) {
             selection.stage == "before" -> "查看开学安排 ›"
             selection.stage == "ended" -> "查看完整课表 ›"
             selection.stage != "active" -> "打开湖畔课表 ›"
-            kind == "small" && !tomorrow -> "今日还有${selection.remaining}堂课 ›"
+            kind == "small" -> "今日还有${selection.remaining}堂课 ›"
             tomorrow && selection.today.isEmpty() -> "明天没有课程 ›"
             tomorrow -> "明日${selection.today.size}堂课 ›"
             selection.today.isEmpty() -> "查看今日课表 ›"
@@ -180,7 +182,7 @@ internal class WidgetRenderer(private val context: Context) {
         text(view, "ls_widget_refresh", "更新于${WidgetClock.format(now, "HH:mm")} ↻")
         if (kind == "small") {
             text(view, "ls_widget_remaining", when (selection.stage) {
-                "active" -> if (tomorrow) "共${selection.today.size}堂" else "余${selection.remaining}堂"
+                "active" -> "余${selection.remaining}堂"
                 "before" -> "待开学"
                 "ended" -> "已结束"
                 "unconfirmed" -> "待确认"
@@ -193,10 +195,13 @@ internal class WidgetRenderer(private val context: Context) {
         }
         click(view, "ls_widget_root", widgetId, "calendar", selection.date)
         click(view, "ls_widget_remaining", widgetId, "calendar", selection.date)
-        dayToggle(view, widgetId, kind, tomorrow)
         refresh(view, widgetId, kind)
-        if (kind == "large") renderLarge(view, widgetId, snapshot, selection, options, now)
-        else renderSmall(view, widgetId, snapshot, selection, options, short, tomorrow, now, smallCourses, layout == "ls_widget_small_capped")
+        if (kind == "large") {
+            dayToggle(view, widgetId, tomorrow)
+            renderLarge(view, widgetId, snapshot, selection, options, now)
+        } else {
+            renderSmall(view, widgetId, snapshot, selection, options, short, now, smallCourses, layout == "ls_widget_small_capped")
+        }
         return view
     }
     private fun renderLarge(view: RemoteViews, widgetId: Int, snapshot: WidgetSnapshot?, selection: WidgetSelection, options: WidgetOptions, now: Long) {
@@ -214,7 +219,9 @@ internal class WidgetRenderer(private val context: Context) {
         view.setPendingIntentTemplate(id("ls_widget_list"), activity(widgetId, "calendar", selection.date, true))
         if (Build.VERSION.SDK_INT >= 31) {
             val items = RemoteViews.RemoteCollectionItems.Builder().setHasStableIds(true).setViewTypeCount(1)
-            selection.today.forEach { course -> items.addItem(stableWidgetItemId(course.id), courseRow(course, options, now)) }
+            WidgetSelector.largeCourses(selection.today, now).forEach { course ->
+                items.addItem(stableWidgetItemId(course.id), courseRow(course, options, now))
+            }
             view.setRemoteAdapter(id("ls_widget_list"), items.build())
         } else {
             val service = Intent(context, WidgetCollectionService::class.java).apply {
@@ -254,7 +261,7 @@ internal class WidgetRenderer(private val context: Context) {
         view.setOnClickFillInIntent(id("ls_course_card"), courseExtras(course))
         return view
     }
-    private fun renderSmall(view: RemoteViews, widgetId: Int, snapshot: WidgetSnapshot?, selection: WidgetSelection, options: WidgetOptions, short: Boolean, tomorrow: Boolean, now: Long, courses: List<WidgetCourse>, capped: Boolean) {
+    private fun renderSmall(view: RemoteViews, widgetId: Int, snapshot: WidgetSnapshot?, selection: WidgetSelection, options: WidgetOptions, short: Boolean, now: Long, courses: List<WidgetCourse>, capped: Boolean) {
         val slots = if (short) 2 else 4
         if (capped) {
             view.removeAllViews(id("ls_small_more_courses"))
@@ -269,22 +276,22 @@ internal class WidgetRenderer(private val context: Context) {
         if (course == null) {
             text(view, "ls_small_label", "湖畔课表")
             visible(view, "ls_small_status", false)
-            text(view, "ls_small_name", if (tomorrow && selection.stage == "active") "明天没有课程" else WidgetSelector.emptyMessage(selection.stage, true))
+            text(view, "ls_small_name", WidgetSelector.emptyMessage(selection.stage, true))
             text(view, "ls_small_meta", if (selection.stage == "before") "${snapshot?.semester?.monday} 开学" else "点击打开课表")
             visible(view, "ls_small_conflict", false)
             click(view, "ls_small_content", widgetId, target, selection.date)
             return
         }
         courses.forEachIndexed { index, item ->
-            if (index < 4) renderSmallCourse(view, widgetId, item, selection, options, tomorrow, index, courses.size, now)
+            if (index < 4) renderSmallCourse(view, widgetId, item, selection, options, index, courses.size, now)
             else {
                 val row = RemoteViews(context.packageName, resource("layout", "ls_widget_small_extra_row"))
-                renderSmallCourse(row, widgetId, item, selection, options, tomorrow, index, courses.size, now, slotIndex = 0)
+                renderSmallCourse(row, widgetId, item, selection, options, index, courses.size, now, slotIndex = 0)
                 view.addView(id("ls_small_more_courses"), row)
             }
         }
     }
-    private fun fittingSmallCourses(courses: List<WidgetCourse>, selection: WidgetSelection, options: WidgetOptions, tomorrow: Boolean, height: Float, width: Float): List<WidgetCourse> {
+    private fun fittingSmallCourses(courses: List<WidgetCourse>, selection: WidgetSelection, options: WidgetOptions, height: Float, width: Float): List<WidgetCourse> {
         if (courses.isEmpty()) return courses
         fun paint(size: String, bold: Boolean = false) = TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
             textSize = dimension(size)
@@ -304,7 +311,7 @@ internal class WidgetRenderer(private val context: Context) {
         // Recheck when the count changes: the first conflict badge can then grow.
         repeat(3) {
             val heights = courses.mapIndexed { index, item ->
-                val label = smallCourseLabel(item, selection, tomorrow, index, shown)
+                val label = smallCourseLabel(item, selection, index, shown)
                 val labelWidth = if (label.isEmpty()) 0f else labelPaint.measureText(label) + dimension("ls_widget_small_label_margin")
                 val titleHeight = maxOf(dimension("ls_widget_small_title_min"), textHeight(item.name, namePaint, contentWidth - dimension("ls_widget_small_title_inset") - labelWidth))
                 val metaHeight = textHeight(styledMeta(WidgetText.smallMeta(item, options)), metaPaint, contentWidth)
@@ -316,25 +323,25 @@ internal class WidgetRenderer(private val context: Context) {
         }
         return courses.take(shown)
     }
-    private fun smallDay(course: WidgetCourse, selection: WidgetSelection, tomorrow: Boolean): String = when (course.date) {
-        selection.date -> if (tomorrow) "明日 · " else ""
+    private fun smallDay(course: WidgetCourse, selection: WidgetSelection): String = when (course.date) {
+        selection.date -> ""
         WidgetClock.date(WidgetClock.midnight(selection.date) + 86400000L) -> "明日 · "
         else -> WidgetClock.format(course.start, "M月d日 EEE") + " · "
     }
     private fun smallBadge(course: WidgetCourse, selection: WidgetSelection, index: Int, shown: Int): String =
         if (index == 0 && selection.current.size > shown) " · 同时另有${selection.current.size - shown}堂" else if (course.conflict) " · 冲突" else ""
-    private fun smallCourseLabel(course: WidgetCourse, selection: WidgetSelection, tomorrow: Boolean, index: Int, shown: Int): String =
-        (smallDay(course, selection, tomorrow).removeSuffix(" · ") + smallBadge(course, selection, index, shown)).trim().removePrefix("· ")
+    private fun smallCourseLabel(course: WidgetCourse, selection: WidgetSelection, index: Int, shown: Int): String =
+        (smallDay(course, selection).removeSuffix(" · ") + smallBadge(course, selection, index, shown)).trim().removePrefix("· ")
     private fun smallSlot(name: String, index: Int): String = name + when (index) {
         0 -> ""; 1 -> "_second"; 2 -> "_third"; 3 -> "_fourth"
         else -> error("Invalid compact course slot: $index")
     }
-    private fun renderSmallCourse(view: RemoteViews, widgetId: Int, course: WidgetCourse, selection: WidgetSelection, options: WidgetOptions, tomorrow: Boolean, index: Int, shown: Int, now: Long, slotIndex: Int = index) {
+    private fun renderSmallCourse(view: RemoteViews, widgetId: Int, course: WidgetCourse, selection: WidgetSelection, options: WidgetOptions, index: Int, shown: Int, now: Long, slotIndex: Int = index) {
         fun slot(name: String): String = smallSlot(name, slotIndex)
-        val day = smallDay(course, selection, tomorrow)
-        val status = if (selection.current.any { it.id == course.id }) "进行中" else if (tomorrow && index == 0) "首堂课" else "下一节"
+        val day = smallDay(course, selection)
+        val status = if (selection.current.any { it.id == course.id }) "进行中" else "下一节"
         val badge = smallBadge(course, selection, index, shown)
-        val label = smallCourseLabel(course, selection, tomorrow, index, shown)
+        val label = smallCourseLabel(course, selection, index, shown)
         text(view, slot("ls_small_label"), label)
         visible(view, slot("ls_small_label"), label.isNotEmpty())
         visible(view, slot("ls_small_status"), true)

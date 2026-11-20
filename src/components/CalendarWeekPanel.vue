@@ -1,33 +1,43 @@
 <template>
   <view class="week-content" :data-week="weekPanel.week">
     <CalendarDayHeading :month="weekPanel.month" :days="weekPanel.days" :today-iso="todayIso" :focused-day-iso="focusedDayIso" @day="$emit('day', $event)" />
-    <scroll-view :key="weekPanel.week" class="calendar-scroll" scroll-y :scroll-top="0">
-      <view v-if="!weekPanel.tiles.length" class="empty-state"><view class="empty-art"><AppIcon name="lake" :size="48" color="#8CA9BF" /><view class="empty-line"/><view class="empty-line short"/></view><text class="empty-title">{{ store.scenario === 'empty' ? '你的时间，等你来安排' : '这一周，暂时没有课' }}</text><text class="empty-copy">{{ store.scenario === 'empty' ? '导入国科大课表，开启清晰有序的新学期。' : '试试切换教学周，或查看已有课程的上课周次。' }}</text><button class="primary-button" :class="{ 'empty-return-current': store.scenario !== 'empty' }" @click="$emit('empty')">{{ store.scenario === 'empty' ? '从教务导入' : '回到本周' }}<AppIcon name="arrow" :size="18" :color="store.scenario === 'empty' ? 'white' : '#527DA8'" /></button><button v-if="store.scenario === 'empty'" class="empty-demo" @click="$emit('demo')">先看看示例课表</button></view>
-      <view v-else class="calendar-body">
+    <NativeScrollArea :key="weekPanel.week" class="calendar-scroll">
+      <view v-if="!weekPanel.tiles.length" class="empty-state empty-grid-intro">
+        <view class="empty-art"><AppIcon name="lake" :size="48" color="#8CA9BF" /><view class="empty-line"/><view class="empty-line short"/></view>
+        <text class="empty-title">{{ !store.schedule.meetings.length ? '课表里还没有课程' : '这一周，暂时没有课' }}</text>
+        <text class="empty-copy">{{ !store.schedule.meetings.length ? '从教务导入学期课程。' : '试试切换教学周，或查看已有课程的上课周次。' }}</text>
+        <button class="primary-button" :class="{ 'empty-return-current': store.schedule.meetings.length > 0 }" @click="$emit('empty')">
+          {{ !store.schedule.meetings.length ? '从教务导入' : '回到本周' }}
+          <AppIcon name="arrow" :size="18" :color="!store.schedule.meetings.length ? 'white' : '#527DA8'" />
+        </button>
+        <button v-if="store.scenario === 'empty'" class="empty-demo" @click="$emit('demo')">先看看示例课表</button>
+      </view>
+      <view class="calendar-body">
         <view class="grid-surface" aria-hidden="true"><view class="grid-session morning"/><view class="grid-session afternoon"/><view class="grid-session evening"/></view>
         <view v-for="period in store.schedule.periods" :key="period.section" class="grid-row" :data-section="period.section" :style="{ top: rowTop(period.section) + 'px', height: rowHeight + 'px' }"><view class="period-label"><text class="period-number number">{{ String(period.section).padStart(2,'0') }}</text><text class="period-time number">{{ period.start }}</text><text class="period-time number">{{ period.end }}</text></view></view>
         <view class="break-row" :style="{ top: 4 * rowHeight + 'px' }"><view class="break-dot"/><text>午间 · 慢下来，好好吃饭</text><view class="break-line"/></view>
         <view class="break-row" :style="{ top: 9 * rowHeight + breakHeight + 'px' }"><view class="break-dot"/><text>傍晚 · 留住一刻湖光</text><view class="break-line"/></view>
         <view class="course-layer">
           <view v-for="(cards, dayIndex) in displayColumns" :key="dayIndex" class="course-column">
-            <button v-for="card in cards" :key="card.key" class="course-tile" :class="card.classes" :style="card.style" :aria-label="card.label" @click="$emit('group', card.group)">
-              <view v-if="card.degree" class="tile-accent"/><text class="tile-name">{{ card.name }}</text><text v-if="card.teacher" class="tile-teacher">{{ card.teacher }}</text><text v-if="card.exam" class="tile-exam">{{ card.exam }}</text><text v-if="card.conflict" class="conflict-badge">{{ card.conflictCount }} 门冲突</text><text v-else-if="store.showSections" class="tile-sections number">{{ card.group.start }}–{{ card.group.end }}节</text><view class="tile-location"><view v-for="entry in card.locations" :key="entry.key" class="tile-location-entry"><text v-if="entry.building" class="tile-location-building">{{ entry.building }}</text><text class="tile-location-room">{{ entry.building ? entry.room : entry.display }}</text></view></view>
+            <button v-for="card in cards" :key="card.key" class="course-tile" :class="card.classes" :style="card.style" :data-grid-tiles="card.dragTiles" :aria-label="card.label" @click="$emit('group', card.group)">
+              <view v-if="card.degree" class="tile-accent"/><text class="tile-name">{{ card.name }}</text><text v-if="card.teacher" class="tile-teacher">{{ card.teacher }}</text><text v-if="card.exam" class="tile-exam">{{ card.exam }}</text><text v-if="card.conflict" class="conflict-badge">{{ card.conflictCount }} 门冲突</text><text v-else-if="store.showSections" class="tile-sections number">{{ card.group.start }}–{{ card.group.end }}节</text><view class="tile-location"><text v-if="card.kind" class="tile-kind">{{ card.kind }}</text><view v-for="entry in card.locations" :key="entry.key" class="tile-location-entry"><text v-if="entry.building" class="tile-location-building">{{ entry.building }}</text><text class="tile-location-room">{{ entry.building ? entry.room : entry.display }}</text></view></view>
             </button>
           </view>
         </view>
       </view>
       <view class="calendar-footer"><text>{{ store.isDemo ? '示例课程与作息 · 不代表真实教学安排' : '教务导入课表 · 已保存到此设备' }}</text><view class="footer-logo" aria-label="湖畔课表"><AppIcon name="lake" :size="23" color="#8CA9BF" /></view></view>
-    </scroll-view>
+    </NativeScrollArea>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
+import NativeScrollArea from './NativeScrollArea.vue'
 import CalendarDayHeading from './CalendarDayHeading.vue'
 import { CALENDAR_ROW_HEIGHT as rowHeight, CALENDAR_BREAK_HEIGHT as breakHeight, calendarRowTop as rowTop } from './calendar-geometry.js'
 import { useScheduleStore } from '../stores/schedule'
-import { compactNumbers, hasTileConflict, layoutTiles, type Tile } from '../domain/schedule'
+import { meetingKindLabels, compactNumbers, hasTileConflict, layoutTiles, type Tile } from '../domain/schedule'
 import type { WeekPanel } from '../domain/calendar-view'
 const props = defineProps<{ weekPanel: WeekPanel; todayIso: string; focusedDayIso: string }>()
 defineEmits(['day', 'group', 'empty', 'demo'])
@@ -64,15 +74,17 @@ function tileStyle(group:ReturnType<typeof layoutTiles>[number]) { return {top:r
 // A heading/highlight update must not repeat sets, regexes and label building.
 const displayColumns = computed(() => props.weekPanel.groupsByDay.map((groups, dayIndex) => groups.map(group => {
   const tile = group.tiles[0]
+  const kind = [...new Set(group.tiles.map(t => t.meeting.kind && meetingKindLabels[t.meeting.kind]).filter(Boolean))].join(' / ')
+  const dragTiles = JSON.stringify(group.tiles.map(t => ({ id: t.id, name: t.course.name, start: t.start, end: t.end })))
   const teacher = store.showTeachers ? teacherLabel(group.tiles) : ''
   const exam = store.showExams ? examLabel(group.tiles) : ''
   const conflict = groupConflict(group)
   return {
-    key: tile.id, group, name: tile.course.name, degree: tile.course.isDegreeCourse === true,
+    key: tile.id, group, kind, dragTiles, name: tile.course.name, degree: tile.course.isDegreeCourse === true,
     teacher, exam, conflict,
     conflictCount: conflict ? new Set(group.tiles.map(item => item.meeting.id)).size : 0,
     locations: locationEntries(group.tiles), style: tileStyle(group),
-    classes: [tile.course.color, { conflict, 'long-slot': group.end - group.start >= 2, 'single-slot': group.end === group.start }],
+    classes: [tile.course.color, { conflict, 'has-kind': Boolean(kind), 'long-slot': group.end - group.start >= 2, 'single-slot': group.end === group.start }],
     label: `${dayNames[dayIndex]} ${tile.course.name}${teacher ? `，教师${teacher}` : ''}${exam ? `，${exam}` : ''}${store.showSections ? `，第${compactNumbers(tile.meeting.sections)}节` : ''}${conflict ? '，有课程冲突' : ''}`
   }
 })))
@@ -130,4 +142,10 @@ const displayColumns = computed(() => props.weekPanel.groupsByDay.map((groups, d
 .empty-title { font-size:19px; font-weight:600; }.empty-copy { font-size:12px; color:#8b9aaa; line-height:1.8; margin:12px 0 25px; }.empty-return-current { min-height:48px !important; padding:0 12px !important; border-radius:0 !important; background:transparent !important; color:#527DA8 !important; box-shadow:none !important; }.empty-demo { margin-top:10px; min-height:44px; color:#718096; font-size:12px; }
 
 @media (max-width:374px) { .tile-name { font-size:10px; }.tile-location { font-size:8px; }.course-tile { left:.4px; right:.4px; padding-left:4px; padding-right:3px; } }
+.tile-kind { font-size:8px; line-height:1.3; font-weight:600; color:currentColor; }
+.course-tile.has-kind { border-top:2px solid currentColor; }
+.single-slot.has-kind .tile-teacher,.single-slot.has-kind .tile-exam { display:none; }
+.empty-grid-intro { min-height:0; padding:12px; }
+.empty-grid-intro .empty-art { display:none; }
+.empty-grid-intro .empty-copy { margin:4px 0; }
 </style>

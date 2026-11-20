@@ -6,7 +6,7 @@ const http = require('node:http');
 const { spawn } = require('node:child_process');
 const assert = require('node:assert/strict');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const dist = path.resolve('dist/build/h5');
+const dist = path.resolve(process.env.LAKESIDE_TEST_H5_DIR || 'dist/build/h5');
 const out = path.resolve('.artifacts/nav-hop');
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png' };
 
@@ -56,6 +56,8 @@ async function main() {
     ({ sessionId } = await send('Target.attachToTarget', { targetId, flatten: true }, false));
     await send('Runtime.enable');
     await send('Page.enable');
+    await send('Page.bringToFront');
+    await send('Emulation.setFocusEmulationEnabled', { enabled:true });
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
     const evaluate = async expression => {
@@ -67,8 +69,14 @@ async function main() {
       for (let i = 0; i < 140; i++) { if (await evaluate(expression)) return; await sleep(50); }
       throw new Error('Timed out: ' + expression);
     };
+    const fixture = await send('Page.addScriptToEvaluateOnNewDocument', { source: `
+      localStorage.setItem('lakeside:nav-motion:v1', JSON.stringify({type:'string',data:'hop'}));
+      localStorage.setItem('lakeside:nav-q-elastic:v1', JSON.stringify({type:'boolean',data:true}));
+      localStorage.setItem('lakeside:glass-touch-light:v1', JSON.stringify({type:'boolean',data:true}));
+    ` });
     await send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/` });
     await waitFor(`Boolean(document.querySelector('.week-select'))`);
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier:fixture.identifier });
 
 
 
@@ -77,7 +85,12 @@ async function main() {
     let touchCount=0;
     const touch=(type,x,y)=>{const number=++touchCount;return send('Input.dispatchTouchEvent',{type,touchPoints:type==='touchEnd'||type==='touchCancel'?[]:[{x,y,id:1}]}).catch(error=>{throw new Error('Touch '+number+' '+type+' at '+Math.round(x)+','+Math.round(y)+': '+error.message)})};
     const state=()=>evaluate("(()=>{const i=document.querySelector('#liquid-nav-root .glass-selection'),m=new DOMMatrix(getComputedStyle(i).transform);return{x:m.m41,lift:Number(document.querySelector('#liquid-nav-root').style.getPropertyValue('--glass-press')),sx:Number(i.style.getPropertyValue('--glass-stretch')),sy:Number(i.style.getPropertyValue('--glass-squeeze'))}})()");
-    const idle=()=>evaluate("new Promise(resolve=>{let n=0;const o=new MutationObserver(r=>n+=r.length);o.observe(document.querySelector('#liquid-nav-root'),{subtree:true,attributes:true});setTimeout(()=>{o.disconnect();resolve(n)},200)})");
+    const idle=async(held=false)=>{
+      // The independent touch ribbon fades in while held and out after release.
+      const expected = held && process.env.GLASS_TOUCH_LIGHT_OFF !== '1' ? .58 : 0;
+      await waitFor("Number(document.querySelector('#liquid-nav-root .glass-touch-light').style.opacity)==="+expected);
+      return evaluate("new Promise(resolve=>{let n=0;const o=new MutationObserver(r=>n+=r.length);o.observe(document.querySelector('#liquid-nav-root'),{subtree:true,attributes:true});setTimeout(()=>{o.disconnect();resolve(n)},200)})");
+    };
     const lightState=()=>evaluate("(()=>{const r=document.querySelector('#liquid-nav-root'),l=r.querySelector('.glass-light'),s=r.querySelector('.glass-selection'),b=r.querySelector('.glass-bar'),lr=l.getBoundingClientRect(),sr=s.getBoundingClientRect();return{x:lr.x+lr.width/2,y:lr.y+lr.height/2,selectorX:sr.x+sr.width/2,width:lr.width,barHeight:b.clientHeight,opacity:Number(getComputedStyle(l).opacity)}})()");
     const assertLightAt=async(x,y)=>{await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');const l=await lightState();assert.ok(Math.abs(l.x-x)<1&&Math.abs(l.y-y)<1,'light follows the touched position: '+JSON.stringify({expected:{x,y},actual:l}));assert.ok(Math.abs(l.width-l.barHeight*2.1)<.1,'light size matches current bar');assert.ok(l.opacity>.9);};
     await waitFor("Boolean(document.querySelector('#liquid-nav-root[data-glass-renderer]'))");await sleep(150);
@@ -87,7 +100,7 @@ async function main() {
       const sample=(root,index)=>evaluate(`new Promise(resolve=>{
         const r=document.querySelector(${JSON.stringify(root)}),s=r.querySelector('.glass-selection'),b=r.querySelector('.glass-bar'),frames=[],start=performance.now();
         r.querySelector('[data-nav-index="${index}"]').click();
-        function read(){const face=s.firstElementChild,rect=face.getBoundingClientRect(),bar=b.getBoundingClientRect(),m=new DOMMatrix(getComputedStyle(s).transform),n=b.querySelectorAll('[data-nav-index]').length,tab=(bar.width-8)/n;
+        function read(){const face=s.firstElementChild,rect=face.getBoundingClientRect(),bar=b.getBoundingClientRect(),m=new DOMMatrix(getComputedStyle(s).transform),n=b.querySelectorAll('[data-nav-index]').length,tab=s.getBoundingClientRect().width;
           frames.push({t:performance.now()-start,x:m.m41,sx:Number(s.style.getPropertyValue('--glass-stretch')),sy:Number(s.style.getPropertyValue('--glass-squeeze')),shift:parseFloat(s.style.getPropertyValue('--glass-flow-impact-x'))||0,
             center:rect.left+rect.width/2-bar.left-4,left:rect.left-bar.left-4,right:bar.right-4-rect.right,tab,n});
           if(performance.now()-start<1100)requestAnimationFrame(read);else resolve(frames)}requestAnimationFrame(read)
@@ -136,7 +149,7 @@ async function main() {
       const sample = (root,index) => evaluate(`new Promise(resolve=>{
         const r=document.querySelector(${JSON.stringify(root)}),s=r.querySelector('.glass-selection'),frames=[];
         const start=performance.now();r.querySelector('[data-nav-index="${index}"]').click();
-        function read(){const m=new DOMMatrix(getComputedStyle(s).transform),face=s.firstElementChild,after=getComputedStyle(face,'::after'),light=getComputedStyle(r.querySelector('.glass-light')),rect=face.getBoundingClientRect(),base=s.getBoundingClientRect();frames.push({t:performance.now()-start,x:m.m41,y:m.m42,sx:Number(s.style.getPropertyValue('--glass-stretch')),sy:Number(s.style.getPropertyValue('--glass-squeeze')),pressure:Number(r.style.getPropertyValue('--glass-press')),shadow:after.boxShadow,highlight:after.backgroundImage,highlightOpacity:Number(after.opacity),lightOpacity:Number(light.opacity),lightBackground:light.backgroundImage,restShadow:getComputedStyle(face).boxShadow,surfaceShadow:getComputedStyle(r.querySelector('.glass-surface')).boxShadow,filter:getComputedStyle(face).backdropFilter,centerOffset:(rect.left+rect.right-base.left-base.right)/2,shift:parseFloat(s.style.getPropertyValue('--glass-flow-impact-x'))||0});
+        function read(){const m=new DOMMatrix(getComputedStyle(s).transform),face=s.firstElementChild,after=getComputedStyle(face,'::after'),light=getComputedStyle(r.querySelector('.glass-light')),rect=face.getBoundingClientRect(),base=s.getBoundingClientRect();frames.push({t:performance.now()-start,x:m.m41,y:m.m42,sx:Number(s.style.getPropertyValue('--glass-stretch')),sy:Number(s.style.getPropertyValue('--glass-squeeze')),pressure:Number(r.style.getPropertyValue('--glass-press')),shadow:after.boxShadow,highlight:after.backgroundImage,highlightOpacity:Number(after.opacity),lightOpacity:Number(light.opacity),lightBackground:light.backgroundImage,restShadow:getComputedStyle(face).boxShadow,surfaceShadow:getComputedStyle(r.querySelector('.glass-surface')).boxShadow,refractionScale:Number(s.querySelector('feDisplacementMap')?.getAttribute('scale')),filter:getComputedStyle(face).backdropFilter,centerOffset:(rect.left+rect.right-base.left-base.right)/2,shift:parseFloat(s.style.getPropertyValue('--glass-flow-impact-x'))||0});
           if(performance.now()-start<850)requestAnimationFrame(read);else resolve(frames)}requestAnimationFrame(read)
       })`);
       const settle = async (root,index) => { await click(root+` [data-nav-index="${index}"]`);await sleep(850) };
@@ -184,8 +197,8 @@ async function main() {
           'off removes both dark and white transient rim shadows throughout movement and arrival');
         assert.ok(frames.every(f=>f.lightOpacity===0),'off removes the broad flow halo throughout movement and arrival');
         assert.ok(frames.every(f=>f.lightBackground.includes('radial-gradient')),'the glass light material is retained for the enabled state');
-        assert.ok(frames.every(f=>f.pressure===0&&f.highlightOpacity===0&&!f.filter.includes('url(')),
-          'off removes automatic selector refraction and reflection during flow travel and arrival');
+        assert.ok(frames.every(f=>f.pressure===0&&f.highlightOpacity===0&&f.refractionScale===frames.at(-1).refractionScale),
+          'off keeps flow refraction at its resting strength during automatic travel and arrival');
         assert.ok(frames.every(f=>f.highlight.includes('linear-gradient')),
           'the reflection material remains available for real finger presses');
         assert.ok(frames.every(f=>f.restShadow!=='none'&&f.surfaceShadow!=='none'),'resting selector and bar shadows remain');
@@ -219,7 +232,7 @@ async function main() {
       const realHopLeft=await sample(actual,1);
       assertHopInertia(realHopLeft,realTab,-1);
       assert.equal(errors.length,0,errors.join('\n'));
-      checks.push('Q elastic defaults on, toggles immediately with pointer/keyboard and persists after reload',
+      checks.push('Q elastic toggles immediately with pointer/keyboard and persists after reload',
         'real flow navigation and preview keep exact width/height; braking, wall elongation and hop landing squash are disabled while hop travel remains',
         'flow dynamic rim shadows and automatic selector optics are off at every frame, while resting glass and press materials remain',
         'the outer moving halo stays invisible in flow when off, and returns when enabled; hop light remains unchanged',
@@ -277,27 +290,28 @@ async function main() {
     const tab=(bar.width-8)/tabCount, x=i=>bar.x+4+(i+.5)*tab,y=bar.y+bar.height/2;
     await touch('touchStart',x(0),y);await sleep(250);
     const held=await state();assert.ok(held.sy>1.35&&held.sx>1.1,'long press visibly enlarges in both axes');
-    const material=()=>evaluate("(()=>{const root=document.querySelector('#liquid-nav-root'),e=root.querySelector('.glass-selection > uni-view'),s=getComputedStyle(e),b=getComputedStyle(e,'::before'),a=getComputedStyle(e,'::after'),l=getComputedStyle(root.querySelector('.glass-light'));return{clear:root.classList.contains('is-material-clear'),filter:s.backdropFilter,background:s.backgroundColor,gradient:s.backgroundImage,tint:Number(b.opacity),highlight:a.backgroundImage,highlightOpacity:Number(a.opacity),light:l.backgroundImage,lightOpacity:Number(l.opacity),edge:a.boxShadow}})()");
-    const assertClear=m=>{
-      assert.equal(m.clear,true);assert.match(m.filter,/^brightness\(1\) url\(/);assert.equal(m.background,'rgba(0, 0, 0, 0)');assert.equal(m.tint,0);
+    const material=()=>evaluate("(()=>{const root=document.querySelector('#liquid-nav-root'),e=root.querySelector('.glass-selection > uni-view'),s=getComputedStyle(e),b=getComputedStyle(e,'::before'),a=getComputedStyle(e,'::after'),l=getComputedStyle(root.querySelector('.glass-light'));return{clear:root.classList.contains('is-material-clear'),filter:s.backdropFilter,background:s.backgroundColor,gradient:s.backgroundImage,tint:Number(b.opacity),highlight:a.backgroundImage,highlightOpacity:Number(a.opacity),light:l.backgroundImage,lightOpacity:Number(l.opacity),edge:a.boxShadow,scales:[...root.querySelectorAll('.glass-selection feDisplacementMap')].map(e=>Number(e.getAttribute('scale'))),ribbon:root.querySelector('.glass-touch-light canvas')?.width}})()");
+    const assertPressed=m=>{
+      assert.equal(m.clear,true);assert.match(m.filter,/^brightness\(0\.94\) url\(/);assert.equal(m.background,'rgba(0, 0, 0, 0)');assert.equal(m.tint,1);
+      assert.equal(m.scales.length,7);assert.ok(m.scales.every(scale=>scale>25.9 && scale<=26));
       assert.match(m.gradient,/linear-gradient/,'original surface highlight remains');
-      assert.match(m.highlight,/linear-gradient/,'pressed reflection remains');
+      assert.equal(m.highlight,'none','the rim and the canvas supply the touch highlight');
+      assert.equal(m.ribbon,128,'the full-resolution ribbon is present');
       assert.match(m.light,/radial-gradient/,'moving light remains');
       assert.ok(m.highlightOpacity>.9&&m.lightOpacity>.9,'highlights are actually visible while held');
       const peakAlpha=gradient=>{const alphas=[...gradient.matchAll(/rgba\([^)]*,\s*([\d.]+)\)/g)].map(match=>Number(match[1]));assert.ok(alphas.length>0);return Math.max(...alphas)};
-      assert.ok(peakAlpha(m.gradient)>0&&peakAlpha(m.gradient)<=.045,'active surface sheen remains but is at most 4% white');
-      assert.ok(peakAlpha(m.highlight)>0&&peakAlpha(m.highlight)<=.065,'pressed reflection remains but is at most 6% white');
+      assert.ok(peakAlpha(m.gradient)>0&&Math.abs(peakAlpha(m.gradient)-28/255)<.003,'the original surface sheen remains at its configured alpha');
       assert.ok(peakAlpha(m.light)>0&&peakAlpha(m.light)<=.065,'tracked light remains but is at most 6% white');
       assert.notEqual(m.edge,'none');
     };
-    assertClear(await material());
+    assertPressed(await material());
     const bounds=await evaluate("(()=>{const r=document.querySelector('#liquid-nav-root .glass-selection > uni-view').getBoundingClientRect();return{left:r.left,right:r.right}})()");
     assert.ok(bounds.left>=0&&bounds.right<=390,'edge capsule stays on screen');
-    await shot('long-press');assert.equal(await idle(),0,'stationary hold stops writing frames');
+    await shot('long-press');assert.equal(await idle(true),0,'stationary hold stops writing attributes at full strength');
     await touch('touchEnd');await sleep(240);assert.equal((await state()).sy,1);
     // Record real frames rather than only checking that a light gradient exists.
     await evaluate("window.lightFrames=[];window.lightRecording=true;window.recordLight=()=>{const root=document.querySelector('#liquid-nav-root'),l=root.querySelector('.glass-light').getBoundingClientRect(),s=root.querySelector('.glass-selection').getBoundingClientRect();window.lightFrames.push({light:l.x+l.width/2,selector:s.x+s.width/2});if(window.lightRecording)requestAnimationFrame(window.recordLight)};requestAnimationFrame(window.recordLight)");
-    await evaluate("window.hopFrames=[];window.hopRecording=true;window.hopRead=()=>{const r=document.querySelector('#liquid-nav-root'),i=r.querySelector('.glass-selection'),e=i.querySelector('uni-view'),m=new DOMMatrix(getComputedStyle(i).transform);return{t:performance.now(),x:m.m41,y:m.m42,lift:Number(r.style.getPropertyValue('--glass-press')),sx:Number(i.style.getPropertyValue('--glass-stretch')),sy:Number(i.style.getPropertyValue('--glass-squeeze')),clear:r.classList.contains('is-material-clear'),filter:getComputedStyle(e).backdropFilter,tint:Number(getComputedStyle(e,'::before').opacity)}};window.recordHop=()=>{window.hopFrames.push(window.hopRead());if(window.hopRecording)requestAnimationFrame(window.recordHop)};requestAnimationFrame(window.recordHop)");
+    await evaluate("window.hopFrames=[];window.hopRecording=true;window.hopRead=()=>{const r=document.querySelector('#liquid-nav-root'),i=r.querySelector('.glass-selection'),e=i.querySelector('uni-view'),m=new DOMMatrix(getComputedStyle(i).transform);return{t:performance.now(),x:m.m41,y:m.m42,lift:Number(r.style.getPropertyValue('--glass-press')),sx:Number(i.style.getPropertyValue('--glass-stretch')),sy:Number(i.style.getPropertyValue('--glass-squeeze')),clear:r.classList.contains('is-material-clear'),filter:getComputedStyle(e).backdropFilter,tint:Number(getComputedStyle(e,'::before').opacity),scale:Number(i.querySelector('feDisplacementMap').getAttribute('scale'))}};window.recordHop=()=>{window.hopFrames.push(window.hopRead());if(window.hopRecording)requestAnimationFrame(window.recordHop)};requestAnimationFrame(window.recordHop)");
     await touch('touchStart',x(1),y);await touch('touchEnd');await sleep(170);await shot('mid-flight');
     await sleep(330);await shot('landing-squash');
     await sleep(420);await evaluate('window.hopRecording=false');
@@ -312,10 +326,10 @@ async function main() {
     assert.ok(Math.abs(frames.at(-1).y)<.1,'the capsule lands at its original height');
     const travelling=frames.filter(f=>f.x>.001&&f.x<end.x-.001);
     assert.ok(travelling.length>0);
-    assert.ok(travelling.every(f=>f.tint>=0&&f.tint<=1),'tint remains bounded');
-    assert.ok(travelling.some(f=>f.tint>0&&f.tint<1),'tint restores gradually during motion');
-    assert.ok(travelling.some(f=>f.tint===0&&f.filter.includes('url(')),'middle of hop stays clear with its own lens');
-    const landed=await material();assert.equal(landed.clear,false);assert.equal(landed.filter,'brightness(0.94) brightness(1)');
+    assert.ok(travelling.every(f=>f.tint===1 && f.filter.startsWith('brightness(0.94) url(')),'the chosen exposure and tint stay stable throughout travel');
+    assert.ok(travelling.some(f=>f.scale>13 && f.scale<26),'the selector interpolates optical strength during travel');
+    assert.equal(frames.at(-1).scale,13,'the full resting refraction remains at the endpoint');
+    const landed=await material();assert.equal(landed.clear,false);assert.match(landed.filter,/^brightness\(0\.94\) url\(/);
     const arrival=frames.findIndex(f=>f.x>=end.x);
     assert.ok(arrival>0&&arrival<frames.length-1);
     assert.ok(frames[arrival].x>frames[arrival-1].x+.001&&frames[arrival+1].x>frames[arrival].x+.001,
@@ -349,7 +363,7 @@ async function main() {
     assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root filter').length"),2);
     await click('.settings-back');await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
     const flowInit=await lightState();assert.ok(Math.abs(flowInit.x-flowInit.selectorX)<1,'flow initializes light at current selector');
-    await touch('touchStart',x(2),y);await sleep(350);assertClear(await material());
+    await touch('touchStart',x(2),y);await sleep(350);assertPressed(await material());
     await assertLightAt(x(2),y);
     await touch('touchCancel');await sleep(1100);
     assert.equal((await material()).clear,false);
@@ -376,7 +390,7 @@ async function main() {
     assert.ok(flowArrival>=0);
     assert.equal(flowFrames[flowArrival].clear,false);
     assert.match(flowFrames[flowArrival].filter,/^brightness\(0\.94\) url\(/,'tint is restored while optical depth follows the remaining pressure');
-    assert.equal(flowFrames.at(-1).filter,'brightness(0.94) brightness(1)','selector optics stop when the physical tail finishes');
+    assert.match(flowFrames.at(-1).filter,/^brightness\(0\.94\) url\(/,'selector keeps its resting rim after the physical tail finishes');
     assert.ok(flowFrames[flowArrival].pressure>.1,'tint no longer waits for pressure to decay');
     const flowLanding=flowArrival;
     assert.ok(flowLanding>=0);
@@ -426,7 +440,7 @@ async function main() {
       return;
     }
     await click('[data-nav-index="2"]');await sleep(600);
-    checks.push('hop and flow holds: no grey tint/dimming; independent rim lens and soft highlights; tint restores gradually before arrival; resting brightness .94 and selector lens off');
+    checks.push('hop and flow retain the rim lens, soft highlights, selected tint, fixed brightness .94 and resting refraction');
     await click('[data-settings-entry="appearance"]');await waitFor("document.querySelector('.settings-page')?.dataset.routePhase==='open'");
     assert.equal(await evaluate("Boolean(document.querySelector('.hop-height-slider'))"),false,'flow hides the hop-only height control');
     await click('[data-nav-motion="hop"]');await sleep(100);

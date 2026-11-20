@@ -54,8 +54,15 @@ async function main(){
     assert.equal(light.surface,initial.surface);
     // Mixed background: each column adapts rather than averaging away one
     // dark patch and making its label unreadable.
-    await evaluate("document.querySelector('#adaptive-fixture').innerHTML='<div style=\"display:flex;height:100%\"><div style=\"flex:1;background:#101720\"></div><div style=\"flex:1;background:white\"></div><div style=\"flex:1;background:white\"></div><div style=\"flex:1;background:#101720\"></div></div>'");
-    await wait("[...document.querySelectorAll('#liquid-nav-root .nav-item')].map(e=>e.dataset.glassBackdropTone).join(',')==='dark,light,light,dark'");await shot('mixed');
+    const mixedTones = initial.items.map((_, i) => i === 0 || i === initial.items.length - 1 ? 'dark' : 'light');
+    await evaluate(`(()=>{
+      const row=document.createElement('div');row.style.cssText='display:flex;height:100%';
+      for(const tone of ${JSON.stringify(mixedTones)}){
+        const column=document.createElement('div');column.style.flex='1';column.style.background=tone==='dark'?'#101720':'white';row.append(column);
+      }
+      document.querySelector('#adaptive-fixture').replaceChildren(row);
+    })()`);
+    await wait(`[...document.querySelectorAll('#liquid-nav-root .nav-item')].map(e=>e.dataset.glassBackdropTone).join(',')===${JSON.stringify(mixedTones.join(','))}`);await shot('mixed');
     // A local PNG with black and white halves proves local pixel sampling,
     // rather than deriving image contrast from its parent or file name.
     await evaluate(`(async()=>{
@@ -88,6 +95,18 @@ async function main(){
       const a=createGlassBackdropAdaptation(r);await new Promise(r=>setTimeout(r,230));a.destroy();const count=a.stats().checks;r.style.left='30px';window.dispatchEvent(new Event('resize'));await new Promise(r=>setTimeout(r,230));const result={before:count,after:a.stats().checks,tone:r.dataset.glassBackdropTone};r.remove();return result;
     })()`);
     assert.equal(lifecycle.before,lifecycle.after);assert.equal(lifecycle.tone,undefined);
+    const checks=['light/dark real backgrounds','per-item mixed contrast','actual PNG local pixels + cache','actual scroll transition','unsupported canvas retains last tone','no idle polling','disable restores baseline','accessibility override','destroy stops work'];
+    const writeReport=(extra={})=>{
+      assert.deepEqual(errors,[]);
+      const report={initial,dark,light,imageReads,idleStart,lifecycle,errors,checks,...extra};
+      fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({checks,errors,out},null,2));
+    };
+    const hasLab=await evaluate("Boolean(document.querySelector('#liquid-nav-root [data-nav-index=\"3\"]'))");
+    if(!hasLab){
+      writeReport();
+      await send('Browser.close',{},false);
+      return;
+    }
     // Exercise the new page through its actual navigation, not injected
     // fixtures: shortcuts, shipped photos, scrolling and fourth-tab geometry.
     await evaluate("document.querySelector('#adaptive-fixture').remove();document.querySelector('#liquid-nav-root [data-nav-index=\"3\"]').click()");
@@ -112,9 +131,8 @@ async function main(){
     await evaluate("document.querySelector('[data-lab-jump=\"glass-lab-type\"]').click()");
     await wait("[...document.querySelectorAll('.lab-scroll *')].some(e=>e.scrollTop>0)");await shot('page-type');
     await evaluate("document.querySelector('#liquid-nav-root [data-nav-index=\"0\"]').click()");await wait("!document.querySelector('.glass-test-page')");
-    assert.deepEqual(errors,[]);
-    const report={initial,dark,light,imageReads,idleStart,lifecycle,pageCases,photoReads,errors,checks:['light/dark real backgrounds','per-item mixed contrast','actual PNG local pixels + cache','actual scroll transition','unsupported canvas retains last tone','no idle polling','disable restores baseline','accessibility override','destroy stops work','actual test page: shortcuts + local photos + mixed contrast','fourth tab geometry at 320/390/768 + exit']};
-    fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({checks:report.checks,errors,out},null,2));
+    checks.push('actual test page: shortcuts + local photos + mixed contrast','fourth tab geometry at 320/390/768 + exit');
+    writeReport({pageCases,photoReads});
     await send('Browser.close',{},false);
   }finally{socket?.close();child.kill();server.close()}
 }

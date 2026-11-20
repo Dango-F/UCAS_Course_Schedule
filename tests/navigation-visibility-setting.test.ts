@@ -10,7 +10,7 @@ describe('navigation visibility preference',()=>{
     setActivePinia(createPinia());const store=useAppearanceStore()
     expect(store.navVisibility).toBe('fixed')
     store.setNavVisibility('auto');expect(values.get('lakeside:nav-visibility:v1')).toBe('auto')
-    expect(store.navMotion).toBe('hop');expect(store.glassClarity).toBe(100)
+    expect(store.navMotion).toBe('flow');expect(store.glassClarity).toBe(75)
     setActivePinia(createPinia());expect(useAppearanceStore().navVisibility).toBe('auto')
     useAppearanceStore().setNavVisibility('fixed')
     setActivePinia(createPinia());expect(useAppearanceStore().navVisibility).toBe('fixed')

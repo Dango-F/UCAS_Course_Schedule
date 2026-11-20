@@ -23,7 +23,26 @@ internal object WidgetClock {
 
 internal data class WidgetOptions(val teachers: Boolean, val location: Boolean, val sections: Boolean, val opacity: Int) {
     fun json(): JSONObject = JSONObject().put("showTeachers", teachers).put("showLocation", location).put("showSections", sections).put("opacity", opacity).put("teacherDefaultVersion", 1)
+
+    fun withChanges(kind: String, changes: JSONObject): WidgetOptions = copy(
+        teachers = changes.optBoolean("showTeachers", teachers),
+        location = changes.optBoolean("showLocation", location),
+        sections = kind == "large" && changes.optBoolean("showSections", sections),
+        opacity = normalizeOpacity(changes.optDouble("opacity").takeIf { it.isFinite() } ?: opacity.toDouble())
+    )
+
     companion object {
+        const val DEFAULT_OPACITY = 80
+
+        private fun normalizeOpacity(value: Double): Int {
+            val finite = value.takeIf { it.isFinite() } ?: DEFAULT_OPACITY.toDouble()
+            return kotlin.math.round(finite.coerceIn(60.0, 100.0) / 5).toInt() * 5
+        }
+
+        fun legacyOpacity(instanceOptions: Sequence<JSONObject>): Int = instanceOptions
+            .map { normalizeOpacity(it.optDouble("opacity")) }
+            .firstOrNull { it != DEFAULT_OPACITY } ?: DEFAULT_OPACITY
+
         fun read(kind: String, json: JSONObject? = null, migrateLegacy: Boolean = false): WidgetOptions = WidgetOptions(
             // Upgrade old small-widget defaults; a setting saved by this version
             // carries the marker and preserves a user's later explicit choice.
@@ -31,7 +50,7 @@ internal data class WidgetOptions(val teachers: Boolean, val location: Boolean, 
             else json?.optBoolean("showTeachers", true) ?: true,
             json?.optBoolean("showLocation", true) ?: true,
             kind == "large" && (json?.optBoolean("showSections", true) ?: true),
-            (((json?.optDouble("opacity", 80.0) ?: 80.0).takeIf { it.isFinite() } ?: 80.0) / 5.0).let { kotlin.math.round(it).toInt() * 5 }.coerceIn(60, 100)
+            normalizeOpacity(json?.optDouble("opacity") ?: DEFAULT_OPACITY.toDouble())
         )
     }
 }
@@ -107,27 +126,66 @@ internal object WidgetText {
 }
 internal data class WidgetSelection(val date: String, val week: Int, val today: List<WidgetCourse>, val current: List<WidgetCourse>, val next: WidgetCourse?, val remaining: Int, val stage: String)
 internal object WidgetDayView {
-    // A preview survives periodic refresh/process death, but never becomes tomorrow again after midnight.
-    fun offset(baseDate: String?, value: Int, now: Long): Int = if (baseDate == WidgetClock.date(now) && value == 1) 1 else 0
+    // A preview survives refresh/process death, but never becomes tomorrow again after midnight.
+    fun offset(kind: String, baseDate: String?, value: Int, now: Long): Int =
+        if (kind == "large" && baseDate == WidgetClock.date(now) && value == 1) 1 else 0
     fun date(now: Long, offset: Int): String = WidgetClock.date(WidgetClock.midnight(WidgetClock.date(now)) + if (offset == 1) 86400000L else 0L)
 }
+internal object WidgetCourseBoundaries {
+    data class Update(val nextAt: Long?, val refreshDue: Boolean)
+
+    fun next(snapshot: WidgetSnapshot?, after: Long): Long? {
+        if (snapshot?.semester?.confirmed != true) return null
+        var next: Long? = null
+        for (course in snapshot.courses) {
+            val boundary = when {
+                course.start > after -> course.start
+                course.end > after -> course.end
+                else -> continue
+            }
+            if (next == null || boundary < next) next = boundary
+        }
+        return next
+    }
+
+    fun isDue(snapshot: WidgetSnapshot?, scheduled: Long, delivered: Long, now: Long): Boolean =
+        delivered > 0 && delivered == scheduled && delivered <= now && next(snapshot, delivered - 1) == delivered
+
+    // The receiver and lifecycle recovery consume the same persisted boundary.
+    // A late delivery may cross several changes; render once using the actual time.
+    fun update(snapshot: WidgetSnapshot?, scheduled: Long, delivered: Long?, now: Long): Update? {
+        if (delivered != null && (scheduled == 0L || delivered != scheduled)) return null
+        return Update(next(snapshot, now), isDue(snapshot, scheduled, scheduled, now))
+    }
+}
 internal object SmallWidgetSizing {
+    const val ONE_ROW_HEIGHT = 78f
+    data class Frame(val minHeight: Float, val layoutHeight: Float) {
+        // The launcher can subtract horizontal padding after reporting its width.
+        val minWidth: Float get() = 1f
+    }
+
     // Pre-send a range of heights so the host can switch views during dragging,
     // even when it only notifies the provider after the user releases the handle.
-    fun responsiveHeights(twoRowHeight: Float, maximumHeight: Float): List<Float> {
+    fun responsiveFrames(twoRowHeight: Float, maximumHeight: Float, reportedHeight: Float): List<Frame> {
         val cap = if (twoRowHeight.isFinite() && twoRowHeight >= 140f) twoRowHeight else 180f
         val step = cap / 2f
         val maximum = if (maximumHeight.isFinite()) maxOf(maximumHeight, cap * 2f) else cap * 2f
-        val heights = mutableListOf(48f, 62f, 78f, 140f, cap).distinct().toMutableList()
+        val heights = listOf(48f, 62f, ONE_ROW_HEIGHT, 140f, cap).distinct().toMutableList()
         var next = cap + step
-        while (heights.size < 16 && next <= maximum + step) {
+        // Android allows sixteen entries, including the default used before measurement.
+        while (heights.size < 15 && next <= maximum + step) {
             heights.add(next)
             next += step
         }
         // Very large hosts still receive a frame for their current capacity.
         val current = cap + floor(((maximum - cap) / step).toDouble()).toFloat().coerceIn(0f, 30f) * step
         if (current > heights.last()) heights[heights.lastIndex] = current
-        return heights
+        val fallback = reportedHeight.takeIf { it.isFinite() && it > 0f } ?: ONE_ROW_HEIGHT
+        // Without a measured size Android uses the entry with the smallest area.
+        // Once measured, even a very short host can select the dense layout.
+        val defaultFrame = Frame(1f, heights.lastOrNull { it <= fallback } ?: heights.first())
+        return listOf(defaultFrame) + heights.map { Frame(if (it == heights.first()) 2f else it, it) }
     }
     // Two/four are the compact widget's base capacities. Measurement limits
     // additional rows; it must not remove a base slot just to preserve spacing.
@@ -165,12 +223,15 @@ internal object WidgetResizeRequests {
     @Synchronized fun cancel(id: Int) { latest.remove(id) }
 }
 internal object WidgetSelector {
-    // Reuse the same semester ordering and stages for two/four-course widgets.
-    // A tomorrow preview stays within tomorrow; normal mode can look ahead.
+    fun largeCourses(dailyCourses: List<WidgetCourse>, now: Long): List<WidgetCourse> {
+        val (unfinished, finished) = dailyCourses.partition { it.end > now }
+        return unfinished + finished.sortedBy { it.end }
+    }
+
+    // The compact widget follows the current day and can look ahead across dates.
     fun smallCourses(snapshot: WidgetSnapshot?, selection: WidgetSelection, now: Long, limit: Int): List<WidgetCourse> {
         if (snapshot == null || selection.stage !in listOf("active", "before")) return emptyList()
-        val candidates = if (selection.date != WidgetClock.date(now)) selection.today
-            else selection.current + snapshot.courses.filter { it.start > now }
+        val candidates = selection.current + snapshot.courses.filter { it.start > now }
         return candidates.distinctBy { it.id }.take(limit.coerceAtLeast(1))
     }
     fun select(snapshot: WidgetSnapshot?, cacheState: String, now: Long, dayOffset: Int = 0): WidgetSelection {

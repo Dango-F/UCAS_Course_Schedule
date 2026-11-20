@@ -1,5 +1,5 @@
 /** A visual control, not a physical light-transmission percentage. */
-export const DEFAULT_GLASS_CLARITY = 100
+export const DEFAULT_GLASS_CLARITY = 75
 
 const BALANCED_GLASS_CLARITY = 80
 
@@ -16,5 +16,5 @@ export function glassClarityProfile(value: unknown) {
     return { blurFactor: 1 + 3 * haze, surfaceAlpha: .06 + .19 * haze, selectionAlpha: .04 + .06 * haze }
   }
   const clear = (clarity - BALANCED_GLASS_CLARITY) / (100 - BALANCED_GLASS_CLARITY)
-  return { blurFactor: 1 - clear * 2 / 3, surfaceAlpha: .06 - .04 * clear, selectionAlpha: .04 - .015 * clear }
+  return { blurFactor: 1 - clear, surfaceAlpha: .06 - .04 * clear, selectionAlpha: .04 - .015 * clear }
 }

@@ -1,0 +1,8 @@
+.choice-list { margin-top:7px; border-top:1px solid #e2eaf2; }
+.choice-list button { width:100%; min-width:0; min-height:50px; display:flex; align-items:center; justify-content:space-between; gap:5px; padding:8px 0; border-bottom:1px solid #e2eaf2; text-align:left; }
+.choice-list .choice-copy { flex:1; min-width:0; display:grid; gap:3px; }
+.choice-list .choice-name { color:#33475e; font-size:13px; font-weight:600; }
+.choice-list .choice-note { color:#60748a; font-size:11px; line-height:1.45; }
+.choice-list button.selected .choice-name { color:#315d89; }
+.choice-list .choice-check { flex:none; width:17px; display:grid; place-items:center; }
+.choice-list button:focus-visible { outline:2px solid #527da8; outline-offset:1px; }

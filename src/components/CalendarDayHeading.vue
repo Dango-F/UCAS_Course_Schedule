@@ -15,7 +15,7 @@ defineEmits(['day'])
 </script>
 
 <style scoped>
-.calendar-heading { flex-shrink:0; display:flex; padding:12px 8px 10px 0; border-bottom:1px solid #edf1f5; background:white; touch-action:pan-y; }
+.calendar-heading { flex-shrink:0; display:flex; padding:9px 8px 8px 0; border-top:var(--grid-heading-gap,0px) solid #f6f8fc; border-bottom:1px solid #edf1f5; background:white; touch-action:pan-y; }
 .axis-heading { width:38px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:9px; color:#94a0b0; }
 .day-heading { flex:1; min-height:44px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; padding:0; background:transparent; }
 .day-heading:active { background:#f5f8fb; }

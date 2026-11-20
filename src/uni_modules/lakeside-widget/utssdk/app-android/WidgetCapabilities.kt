@@ -8,6 +8,7 @@ import android.os.Build
 
 /** Query the system's registered providers, not just whether Kotlin code is present. */
 internal object WidgetCapabilities {
+    const val API_VERSION = 5
     fun registeredKinds(context: Context): List<String> {
         val registered = AppWidgetManager.getInstance(context).installedProviders.map { it.provider }.toSet()
         return listOf(LargeWidgetProvider::class.java to "large", SmallWidgetProvider::class.java to "small")

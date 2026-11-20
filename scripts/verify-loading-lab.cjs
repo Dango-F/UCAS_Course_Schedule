@@ -22,7 +22,7 @@ async function main() {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ucas-loading-lab-'));
   const edge = process.env.EDGE_PATH || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe';
-  const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
+  const child = spawn(edge, ['--headless=new', '--no-first-run', '--no-default-browser-check', '--disable-extensions', '--disable-component-extensions-with-background-pages', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { windowsHide: true, stdio: 'ignore' });
   let socket;
   try {
     const portFile = path.join(profile, 'DevToolsActivePort');
@@ -59,15 +59,17 @@ async function main() {
       for (let i = 0; i < 140; i++) { if (await evaluate(expression)) return; await sleep(50); }
       throw new Error('Timed out: ' + expression);
     };
-    await send('Page.navigate', { url: `http://127.0.0.1:${server.address().port}/` });
+    const origin = process.env.LOADING_LAB_URL || `http://127.0.0.1:${server.address().port}/`;
+    await send('Page.navigate', { url: origin });
     await waitFor(`Boolean(document.querySelector('.week-select'))`);
 
     const click = async selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`);
     const openPreview = async () => {
-      if (!await evaluate("Boolean(document.querySelector('.settings-page'))")) await click('[data-nav-index="2"]');
-      await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
+      await waitFor("document.querySelector('#liquid-nav-root [data-nav-index=\"2\"]') && document.querySelector('#liquid-nav-root .glass-selection')?.dataset.glassRenderer");
+      if (!await evaluate("document.querySelector('#liquid-nav-root [data-nav-index=\"2\"]')?.getAttribute('aria-current')==='page'")) await click('#liquid-nav-root [data-nav-index="2"]');
+      await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home' && !document.querySelector('.settings-page').classList.contains('inactive-pane')");
       await click('[data-settings-entry="preview"]');
-      await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='preview'");
+      await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='preview' && document.querySelector('.settings-page').dataset.routePhase==='open'");
       await waitFor(`Boolean(document.querySelector('.motion-section .loading-preview'))`);
       if (await evaluate("Boolean(document.querySelector('.loading-preview.is-complete'))")) await click('.finish-button');
       await waitFor("!document.querySelector('.loading-preview.is-complete')");
@@ -116,7 +118,7 @@ async function main() {
       if (id !== 'ticks' && id !== 'original') {
           const ringTiming = await evaluate(`(() => { const s=getComputedStyle(document.querySelector('.lp-ring')); return [s.transitionDuration,s.transitionTimingFunction] })()`);
           assert.equal(ringTiming[0].split(',')[0].trim(), before[2], 'drawing the circle takes exactly one loading revolution');
-          assert.ok(ringTiming[1].startsWith(id === 'orbit' ? 'cubic-bezier(0.4, 0.18, 0.35, 1)' : 'linear'), 'ring follows the loading turn speed curve');
+          assert.ok(ringTiming[1].startsWith(id === 'orbit' ? 'cubic-bezier(0.4, 0.18, 0.6, 0.82)' : 'linear'), 'ring follows the loading turn speed curve');
           await sleep(450);
           const midway = await evaluate(`parseFloat(getComputedStyle(document.querySelector('.lp-ring')).strokeDashoffset)`);
           assert.ok(midway > 0 && midway < 245.044, 'circle is visibly tracing its full turn');
@@ -146,14 +148,19 @@ async function main() {
     await sleep(3100);
     assert.equal(await evaluate(`Boolean(document.querySelector('.loading-preview.is-complete'))`), false, 'switch cancels pending completion');
     checks.push('vertically centered speed control, half-speed preview, timed full demo and stale timer cancellation');
+    // Local motion and backdrop overrides live in the standalone laboratory.
+    await send('Page.navigate', { url: new URL('?auditStandalone=1#/pages/loading-lab/index', origin).href });
+    await waitFor("Boolean(document.querySelector('.lab-options'))");
+    await click('.variant-option:nth-child(3)');
+    await waitFor("Boolean(document.querySelector('.lp-tick'))");
     await click('[aria-label="课表背景"]');
-    await waitFor(`Boolean(document.querySelector('.motion-context'))`);
-    await click('[aria-label="预览减少动态"]');
+    await waitFor(`Boolean(document.querySelector('.lab-context'))`);
+    await click('[aria-label="减少动态"]');
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.lp-tick')).animationName`), 'none');
     await click('.finish-button');
     await sleep(100);
     assert.equal(await evaluate(`getComputedStyle(document.querySelector('.lp-check')).strokeDashoffset`), '0px');
-    await click('[aria-label="预览减少动态"]');
+    await click('[aria-label="减少动态"]');
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
     for (let i=1;i<=4;i++) {
       await click(`.variant-option:nth-child(${i})`);
@@ -173,8 +180,8 @@ async function main() {
       await shot('layout-' + width);
     }
     assert.equal(await savedData(),savedBefore, 'preview never writes real settings or timetable');
-    await click('.settings-back');
-    await waitFor("document.querySelector('.settings-page')?.dataset.settingsSection==='home'");
+    await send('Page.navigate', { url: new URL('#/pages/index/index', origin).href });
+    await waitFor("Boolean(document.querySelector('.week-select'))");
     await openPreview();
     assert.equal(await evaluate(`Boolean(document.querySelector('.loading-preview.is-complete'))`),false);
     await click('.demo-button');

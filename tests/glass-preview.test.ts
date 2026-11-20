@@ -8,7 +8,7 @@ vi.mock('../src/components/glass-navigation.js', () => ({ createGlassNavigation:
 describe('glass preview comparison lifecycle', () => {
   beforeEach(() => vi.clearAllMocks())
   afterEach(() => vi.useRealTimers())
-  function fixture() {
+  function fixture(initial: number | {clarity:number; navMotion:string; qElastic:boolean; hopPreviewRun?:number} = 25) {
     const lens = {setClarity:vi.fn(),configure:vi.fn(),suspend:vi.fn(),destroy:vi.fn()}
     lens.configure.mockImplementation(config=>lens.setClarity(config.clarity))
     vi.mocked(createGlassNavigation).mockReturnValue(lens)
@@ -18,17 +18,18 @@ describe('glass preview comparison lifecycle', () => {
     const tabs = Array.from({length:3}, () => ({classList:{toggle:vi.fn()},setAttribute:vi.fn()}))
     const lensRoot = Object.assign(new EventTarget(), {querySelector:vi.fn(() => ({})),querySelectorAll:vi.fn(() => tabs)})
     const root = {ownerDocument:doc,dataset:{comparing:'false'},querySelector:(selector:string) => selector === '.glass-compare' ? button : lensRoot}
-    const controller = createGlassPreview(root, 25)
+    const controller = createGlassPreview(root, initial)
     const event = (target:EventTarget, type:string, props = {}) => target.dispatchEvent(Object.assign(new Event(type,{cancelable:true}),props))
     return {lens,lensRoot,tabs,button,doc,win,root,controller,event}
   }
   it('shows default only while held, preserving the latest chosen value', () => {
     const f = fixture()
+    expect(createGlassNavigation).toHaveBeenCalledWith(f.lensRoot, expect.objectContaining({navMotion:'flow',touchLight:false,qElastic:false}), expect.any(Function))
     f.event(f.button,'pointerdown',{pointerId:1,button:0,isPrimary:true})
     expect(f.root.dataset.comparing).toBe('true')
-    expect(f.lens.setClarity).toHaveBeenLastCalledWith(100)
+    expect(f.lens.setClarity).toHaveBeenLastCalledWith(75)
     f.controller.configure(35)
-    expect(f.lens.setClarity).toHaveBeenLastCalledWith(100)
+    expect(f.lens.setClarity).toHaveBeenLastCalledWith(75)
     f.event(f.doc,'pointerup',{pointerId:2})
     expect(f.root.dataset.comparing).toBe('true')
     f.event(f.doc,'pointerup',{pointerId:1})
@@ -72,15 +73,15 @@ describe('glass preview comparison lifecycle', () => {
     f.controller.configure({clarity:25,touchLight:false,navMotion:'hop'})
     expect(f.lens.configure).toHaveBeenLastCalledWith(expect.objectContaining({touchLight:false}))
     f.event(f.button,'pointerdown',{pointerId:1,button:0})
-    expect(f.lens.configure).toHaveBeenLastCalledWith(expect.objectContaining({touchLight:false,clarity:100}))
+    expect(f.lens.configure).toHaveBeenLastCalledWith(expect.objectContaining({touchLight:false,clarity:75}))
     f.controller.configure({clarity:35,touchLight:true,navMotion:'flow'})
     expect(f.lens.configure).toHaveBeenLastCalledWith(expect.objectContaining({touchLight:true,navMotion:'flow'}))
     f.controller.destroy()
   })
   it('starts a left-to-right then right-to-left hop only when the run token changes', () => {
     vi.useFakeTimers()
-    const f = fixture()
-    const config = {clarity:25,navMotion:'hop',hopPeak:9,hopPreviewRun:0,hopPreviewStop:0}
+    const config = {clarity:25,navMotion:'hop',qElastic:true,hopPeak:9,hopPreviewRun:0,hopPreviewStop:0}
+    const f = fixture(config)
     f.controller.configure({...config,hopPeak:7})
     vi.advanceTimersByTime(1000)
     expect(f.lens.suspend).not.toHaveBeenCalled()
@@ -94,8 +95,8 @@ describe('glass preview comparison lifecycle', () => {
   })
   it('cancels an unfinished demo when adjustment starts or the user takes over', () => {
     vi.useFakeTimers()
-    const f = fixture()
-    const config = {clarity:25,navMotion:'hop',hopPeak:9,hopPreviewRun:1,hopPreviewStop:0}
+    const config = {clarity:25,navMotion:'hop',qElastic:true,hopPeak:9,hopPreviewRun:1,hopPreviewStop:0}
+    const f = fixture({...config,hopPreviewRun:0})
     f.controller.configure(config)
     vi.advanceTimersByTime(32)
     f.controller.configure({...config,hopPeak:5,hopPreviewStop:1})

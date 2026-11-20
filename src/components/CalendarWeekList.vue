@@ -1,13 +1,13 @@
 <template>
   <view class="week-list-content" :data-week="weekPanel.week">
-    <scroll-view :key="weekPanel.week" class="course-list-scroll" scroll-y :scroll-top="0">
+    <NativeScrollArea :key="weekPanel.week" class="course-list-scroll">
       <view v-if="!weekPanel.tiles.length" class="empty-state">
         <view class="empty-art"><AppIcon name="lake" :size="48" color="#8CA9BF" /><view class="empty-line"/><view class="empty-line short"/></view>
-        <text class="empty-title">{{ store.scenario === 'empty' ? '你的时间，等你来安排' : '这一周，暂时没有课' }}</text>
-        <text class="empty-copy">{{ store.scenario === 'empty' ? '导入国科大课表，开启清晰有序的新学期。' : '试试切换教学周，或查看已有课程的上课周次。' }}</text>
-        <button class="primary-button" :class="{ 'empty-return-current': store.scenario !== 'empty' }" @click="$emit('empty')">
-          {{ store.scenario === 'empty' ? '从教务导入' : '回到本周' }}
-          <AppIcon name="arrow" :size="18" :color="store.scenario === 'empty' ? 'white' : '#527DA8'" />
+        <text class="empty-title">{{ !store.schedule.meetings.length ? '课表里还没有课程' : '这一周，暂时没有课' }}</text>
+        <text class="empty-copy">{{ !store.schedule.meetings.length ? '从教务导入学期课程。' : '试试切换教学周，或查看已有课程的上课周次。' }}</text>
+        <button class="primary-button" :class="{ 'empty-return-current': store.schedule.meetings.length > 0 }" @click="$emit('empty')">
+          {{ !store.schedule.meetings.length ? '从教务导入' : '回到本周' }}
+          <AppIcon name="arrow" :size="18" :color="!store.schedule.meetings.length ? 'white' : '#527DA8'" />
         </button>
         <button v-if="store.scenario === 'empty'" class="empty-demo" @click="$emit('demo')">先看看示例课表</button>
       </view>
@@ -32,7 +32,7 @@
                 :aria-label="card.label"
                 @click="$emit('group', group.group)">
                 <view class="course-heading">
-                  <text class="course-name">{{ card.tile.course.name }}</text>
+                  <text class="course-name">{{ tileTitle(card.tile) }}</text>
                   <text v-if="group.conflict" class="conflict-tag">时段冲突</text>
                 </view>
                 <text class="course-time number">{{ card.start }} – {{ card.end }}</text>
@@ -51,15 +51,16 @@
         <text>{{ store.isDemo ? '示例课程与作息 · 不代表真实教学安排' : '教务导入课表 · 已保存到此设备' }}</text>
         <view class="footer-logo" aria-label="湖畔课表"><AppIcon name="lake" :size="23" color="#8CA9BF" /></view>
       </view>
-    </scroll-view>
+    </NativeScrollArea>
   </view>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
+import NativeScrollArea from './NativeScrollArea.vue'
 import { useScheduleStore } from '../stores/schedule'
-import type { layoutTiles } from '../domain/schedule'
+import { tileTitle, type layoutTiles } from '../domain/schedule'
 import type { WeekPanel } from '../domain/calendar-view'
 import { calendarListDays } from '../domain/calendar-list-view'
 
@@ -80,7 +81,7 @@ const visibleDays = computed(() => calendarListDays(props.weekPanel, store.sched
 .course-list-scroll { flex:1; min-height:0; height:0; background:#f6f8fc; touch-action:pan-y; }
 .course-list-body { padding:12px 16px 6px; }
 .list-day-section + .list-day-section { margin-top:15px; }
-.list-day-heading { width:100%; min-height:32px; display:flex; align-items:center; gap:9px; padding:0 2px; margin-bottom:10px; text-align:left; background:transparent; }
+.list-day-heading { width:100%; min-height:32px; display:flex; align-items:center; gap:9px; padding:0 2px; margin-bottom:4px; text-align:left; background:transparent; }
 .list-day-caption { display:flex; align-items:center; gap:7px; flex-shrink:0; }
 .list-day-name { font-size:13px; font-weight:600; color:#527da8; white-space:nowrap; }
 .list-day-date { font-size:11px; color:#8997a8; white-space:nowrap; }

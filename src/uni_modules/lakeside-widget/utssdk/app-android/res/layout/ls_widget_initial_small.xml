@@ -1,0 +1,30 @@
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <ImageView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:src="@drawable/ls_widget_background"
+        android:scaleType="fitXY"
+        android:alpha="0.8"
+        android:importantForAccessibility="no" />
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:text="@string/ls_widget_initial_status"
+        android:textColor="#344D64"
+        android:fontFamily="sans-serif-medium"
+        android:textSize="15sp"
+        android:autoSizeTextType="uniform"
+        android:autoSizeMinTextSize="12sp"
+        android:autoSizeMaxTextSize="15sp"
+        android:autoSizeStepGranularity="1sp"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:ellipsize="end" />
+</FrameLayout>

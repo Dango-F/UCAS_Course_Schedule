@@ -13,7 +13,8 @@ beforeEach(() => {
   vi.stubGlobal('uni', { getStorageSync: () => saved, setStorageSync: (_key: string, value: string) => { saved = value } })
   port = { syncSnapshot: vi.fn(async json => ({ ok: true, revision: JSON.parse(json).revision })),
     getWidgetState: () => ({ ...unsupportedWidgetState(), supported: true }),
-    updateWidgetOptions: async () => true, refreshWidgets: vi.fn(), requestPinWidget: () => ({ status: 'manual' }), consumePendingAction: () => null }
+    updateWidgetOptions: async () => true, scheduleCourseRefresh: vi.fn(async () => true), openCourseRefreshSettings: () => false,
+    requestPinWidget: () => ({ status: 'manual' }), consumePendingAction: () => null }
   installWidgetNative(port)
   widgetSyncStatus.value = { state: 'idle', message: '', at: 0 }
   pendingWidgetAction.value = null
@@ -65,13 +66,31 @@ describe('小组件同步生命周期', () => {
     await syncSavedWidgetSchedule(makeDemo('normal'))
     expect(widgetSyncStatus.value.state).toBe('synced')
   })
-  it('缓存内容一致时只刷新，强制同步仍会重写', async () => {
+  it('缓存内容一致时只重新安排上下课刷新，强制同步仍会重写', async () => {
     const schedule = makeDemo('normal')
     port.getWidgetState = () => ({ ...unsupportedWidgetState(), supported: true, revision: buildWidgetSnapshot(schedule).revision })
     await syncSavedWidgetSchedule(schedule)
     expect(port.syncSnapshot).not.toHaveBeenCalled()
-    expect(port.refreshWidgets).toHaveBeenCalledOnce()
+    expect(port.scheduleCourseRefresh).toHaveBeenCalledOnce()
     await syncSavedWidgetSchedule(schedule, true)
+    expect(port.syncSnapshot).toHaveBeenCalledOnce()
+  })
+  it('等原生预约返回才结束同步，并可单独重试预约失败的快照', async () => {
+    const schedule = makeDemo('normal')
+    const revision = buildWidgetSnapshot(schedule).revision
+    vi.mocked(port.syncSnapshot).mockResolvedValueOnce({ ok: true, revision, courseRefreshReady: false })
+    await syncSavedWidgetSchedule(schedule)
+    expect(widgetSyncStatus.value.message).toContain('系统未能预约')
+
+    port.getWidgetState = () => ({ ...unsupportedWidgetState(), supported: true, revision })
+    let done!: (ok: boolean) => void
+    port.scheduleCourseRefresh = () => new Promise(resolve => { done = resolve })
+    const retry = syncSavedWidgetSchedule(schedule)
+    await Promise.resolve()
+    expect(widgetSyncStatus.value.state).toBe('syncing')
+    done(true)
+    await retry
+    expect(widgetSyncStatus.value.state).toBe('synced')
     expect(port.syncSnapshot).toHaveBeenCalledOnce()
   })
   it('保存失败和演示场景不覆盖原生缓存，启动补偿读取持久化内容', async () => {

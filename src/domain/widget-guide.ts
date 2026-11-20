@@ -42,7 +42,7 @@ export function widgetManualInstructions(brand = ''): string {
 }
 
 export function widgetPinFeedback(result: WidgetPinResult, state: WidgetState, brand = ''): { title: string; message: string } {
-  if (result.status === 'requested') return { title: '已请求系统添加', message: '请在系统界面确认。若没有弹窗，可点击标题右侧的提示图标查看添加方法。' }
+  if (result.status === 'requested') return { title: '已请求系统添加', message: '' }
   if (result.status === 'unavailable') return { title: '暂时无法添加', message: widgetAvailabilityMessage({ ...state, supported: false, availability: result.reason as WidgetState['availability'] }) }
   if (result.reason === 'foreground_required') return { title: '请返回应用重试', message: '请解锁手机，并在湖畔课表显示在前台时重新点击添加。' }
   return { title: result.status === 'manual' ? '请从桌面添加' : '未能打开系统添加界面', message: widgetManualInstructions(brand) }

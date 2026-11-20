@@ -102,7 +102,7 @@ if (Test-Path -LiteralPath (Join-Path $utsRuntime 'kotlinc/lib/kotlin-compiler.j
 } else { Write-Host 'UTS runtime unavailable; generated bridge compilation skipped. Hand-written Kotlin compilation is not a UTS runtime check.' }
 & node (Join-Path $PSScriptRoot 'export-widget-fixture.cjs')
 if ($LASTEXITCODE -ne 0) { throw 'TypeScript fixture export failed' }
-$modelSources = @((Join-Path $plugin 'WidgetModels.kt'), (Join-Path $widgetRoot 'tests/native/WidgetModelTest.kt'))
+$modelSources = @((Join-Path $plugin 'WidgetModels.kt'), (Join-Path $plugin 'CourseAlarmRegistration.kt'), (Join-Path $widgetRoot 'tests/native/WidgetModelTest.kt'))
 & $JavaPath -cp $compilerClasspath org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -jvm-target 1.8 -classpath (@($jsonJar, $stdlib) -join [IO.Path]::PathSeparator) -d (Join-Path $widgetOutput 'widget-model-tests.jar') @modelSources
 if ($LASTEXITCODE -ne 0) { throw 'Native model test compilation failed' }
 & $JavaPath -cp (@((Join-Path $widgetOutput 'widget-model-tests.jar'), $jsonJar, $stdlib) -join [IO.Path]::PathSeparator) com.lakeside.widget.WidgetModelTestKt (Join-Path $widgetOutput 'snapshot.json')

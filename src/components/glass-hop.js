@@ -1,4 +1,5 @@
 import { installGlassLens } from './glass-lens.js'
+import { listenGlassPress } from './glass-press.js'
 import { hopMaterialProgress } from './glass-selection-material.js'
 import { normalizeHopPeak } from '../domain/navigation-hop'
 
@@ -115,7 +116,7 @@ export function hopTransformOrigin(position, count) {
   return Math.max(0,Math.min(100,position < .5 ? position*100 : position > last-.5 ? 100-(last-position)*100 : 50))
 }
 
-export function createHopNavigation(root, initial, select) {
+export function createHopNavigation(root, initial, select, clock) {
   const doc = root.ownerDocument, win = doc.defaultView
   const bar = root.querySelector('.glass-bar'), indicator = root.querySelector('.glass-selection')
   const light = root.querySelector('.glass-light')
@@ -126,9 +127,12 @@ export function createHopNavigation(root, initial, select) {
   const listeners = []
   let config = initial, airHeight = normalizeHopPeak(initial.hopPeak) - HOP_HELD_LIFT
   let position = initial.activeIndex, lift = 0, airborne = 0, squash = 0, target = position
-  let frame = 0, motion = null, landing = null, press = null, destroyed = false, suppressUntil = 0
+  let frame = 0, motion = null, press = null, destroyed = false, suppressUntil = 0
   let tabWidth = 1, barHeight = 56, measuredSize = ''
   let lightX = 0, lightY = 0, lightOffsetX = 0, lightOffsetY = 0
+  let paintedLift, paintedPosition, paintedRise, paintedOrigin, paintedAngle, paintedStretch, paintedSqueeze
+  let paintedLightX, paintedLightY
+  const iconWeights = []
   const quiet = () => config.reducedMotion || media.matches
   const clamp = value => Math.max(0, Math.min(buttons.length - 1, value))
   function listen(node, type, fn, options) {
@@ -138,37 +142,60 @@ export function createHopNavigation(root, initial, select) {
   function draw() {
     const amount = quiet() ? 0 : lift
     const rise = HOP_HELD_LIFT * amount + airHeight * (quiet() ? 0 : airborne)
-    const material = hopMaterialProgress(amount)
-    root.classList.toggle('is-material-clear', material > 0)
-    root.style.setProperty('--glass-material-progress', material.toFixed(4))
-    // Optical thickness follows the actual inflation, not the tint's plateau.
-    selectorLens.setStrength(amount)
+    if (amount !== paintedLift) {
+      const material = hopMaterialProgress(amount)
+      root.classList.toggle('is-material-clear', material > 0)
+      root.style.setProperty('--glass-material-progress', material.toFixed(4))
+      root.style.setProperty('--glass-press', amount.toFixed(4))
+      selectorLens.setStrength(amount)
+    }
     const shape = hopLandingDeformation(config.qElastic === false ? 0 : squash)
-    indicator.style.transform = `translate3d(${position * 100}%,${-rise}px,0)`
-    indicator.style.setProperty('--glass-stretch', ((1 + .12 * amount) * shape.stretch).toFixed(4))
-    indicator.style.setProperty('--glass-squeeze', ((1 + .38 * amount) * shape.squeeze).toFixed(4))
+    if (position !== paintedPosition || rise !== paintedRise) {
+      indicator.style.transform = `translate3d(${position * 100}%,${-rise}px,0)`
+    }
+    const stretch = ((1 + .12 * amount) * shape.stretch).toFixed(4)
+    const squeeze = ((1 + .38 * amount) * shape.squeeze).toFixed(4)
+    if (paintedStretch !== stretch) indicator.style.setProperty('--glass-stretch', stretch)
+    if (paintedSqueeze !== squeeze) indicator.style.setProperty('--glass-squeeze', squeeze)
+    paintedStretch = stretch; paintedSqueeze = squeeze
     // Grow inward at the first/last tab so the capsule never leaves the screen.
     const origin = config.qElastic === false ? position / Math.max(1, buttons.length - 1) * 100 : hopTransformOrigin(position,buttons.length)
-    indicator.style.setProperty('--hop-origin', `${origin}% 50%`)
-    root.style.setProperty('--glass-press', amount.toFixed(4))
+    if (origin !== paintedOrigin) indicator.style.setProperty('--hop-origin', `${origin}% 50%`)
+    paintedOrigin = origin
     // Follow the finger while held; share the hop clock on release so the
     // highlight returns to the moving capsule without a jump or extra RAF tail.
     lightX = press
       ? press.x - press.left + (press.dragged ? 0 : (position - press.index) * tabWidth)
       : 4 + (position + .5) * tabWidth + lightOffsetX
     lightY = press ? press.y - press.top : barHeight / 2 - rise + lightOffsetY
-    indicator.style.setProperty('--glass-reflection-angle', `${145 + Math.max(-1,Math.min(1,(lightX-(4+(position+.5)*tabWidth))/tabWidth))*28}deg`)
-    light.style.transform = `translate3d(${lightX - barHeight * 1.05}px,${lightY - barHeight * .7}px,0)`
-    buttons.forEach((button, index) => {
+    const angle = 145 + Math.max(-1,Math.min(1,(lightX-(4+(position+.5)*tabWidth))/tabWidth))*28
+    if (angle !== paintedAngle) indicator.style.setProperty('--glass-reflection-angle', `${angle}deg`)
+    paintedAngle = angle
+    const x = lightX - barHeight * 1.05, y = lightY - barHeight * .7
+    if (x !== paintedLightX || y !== paintedLightY) light.style.transform = `translate3d(${x}px,${y}px,0)`
+    paintedLightX = x; paintedLightY = y
+    if (amount !== paintedLift || position !== paintedPosition) buttons.forEach((button, index) => {
       const weight = Math.max(0, 1 - Math.abs(position - index)) * amount
+      if (weight === iconWeights[index]) return
+      iconWeights[index] = weight
       button.style.setProperty('--hop-icon-scale', (1 + .07 * weight).toFixed(4))
       button.style.setProperty('--hop-icon-y', `${-2 * weight}px`)
     })
+    paintedPosition = position; paintedRise = rise; paintedLift = amount
+  }
+  function planLanding(flight, earliest = 0) {
+    const {from, to, duration} = flight
+    if (to === 0 || to === buttons.length-1) {
+      return {at:Math.max(earliest, hopWallStart(from,to,duration,tabWidth)), wall:true}
+    }
+    const at = Math.max(earliest, hopInertiaStart(from,to,duration))
+    const t = at / duration
+    return {at, wall:false, from:hopFrame(from,to,0,0,at,duration).position,
+      velocity:(to-from)*6*t*(1-t)/duration, direction:Math.sign(to-from)}
   }
   function tick(now) {
     frame = 0
     if (destroyed) return
-    let inheritedSquash = 0
     if (motion) {
       const elapsed = now-motion.start
       const state = hopFrame(motion.from, motion.to, motion.startLift, motion.endLift, elapsed, motion.duration)
@@ -182,60 +209,43 @@ export function createHopNavigation(root, initial, select) {
         lift = motion.startLift+(motion.endLift-motion.startLift)*(1-remaining)
         airborne = motion.startAirborne*remaining
       }
-      inheritedSquash = motion.startSquash * remaining
-      if (!landing && motion.inertiaStart != null && elapsed >= motion.inertiaStart) {
-        const time = motion.inertiaStart, t = time/motion.duration
-        const from = hopFrame(motion.from,motion.to,0,0,time,motion.duration).position
-        landing = {kind:'inertia',start:motion.start+time,to:motion.to,from,
-          velocity:(motion.to-motion.from)*6*t*(1-t)/motion.duration,direction:Math.sign(motion.to-motion.from)}
+      squash = motion.startSquash * remaining
+      // Both flight and landing are sampled from the original tap. A missed
+      // frame can cross their boundary without starting another animation.
+      const landing = motion.landing
+      if (landing && elapsed >= landing.at) {
+        const age = elapsed - landing.at
+        if (!landing.wall) position = landingInertiaFrame(landing.from,landing.velocity,motion.to,landing.direction,age,.06,HOP_SQUASH_REBOUND_DURATION).value
+        squash += (1-squash)*hopLandingSquash(age,HOP_SQUASH_REBOUND_DURATION)
       }
-      if (!landing && motion.wallStart != null && elapsed >= motion.wallStart) {
-        landing = {kind:'wall',start:motion.start+motion.wallStart,to:motion.to}
-      }
-      if (state.done) {
-        if (!landing && !motion.settling && config.qElastic !== false && Math.abs(motion.to - motion.from) > .001 && motion.endLift === 0 && !press) {
-          // Use the flight's timestamp, not this RAF's timestamp: a late frame
-          // must not insert a normal-size pause before the compression begins.
-          landing = {kind:'wall',start:motion.start+motion.duration,to:motion.to}
-        }
+      if (state.done && (!landing || elapsed >= landing.at + HOP_SQUASH_DURATION)) {
+        position = motion.to
+        squash = 0
         motion = null
       }
     }
-    squash = inheritedSquash
-    if (landing) {
-      const elapsed = now-landing.start
-      if (landing.kind === 'inertia') position = landingInertiaFrame(landing.from,landing.velocity,landing.to,landing.direction,elapsed,.06,HOP_SQUASH_REBOUND_DURATION).value
-      squash += (1-squash)*hopLandingSquash(elapsed,HOP_SQUASH_REBOUND_DURATION)
-      if (elapsed >= HOP_SQUASH_DURATION) { position = landing.to; landing = null; squash = 0 }
-    }
     draw()
-    if (motion || landing) frame = win.requestAnimationFrame(tick)
+    if (motion) frame = clock.request(tick)
   }
-  function requestDraw() { if (!destroyed && !frame) frame = win.requestAnimationFrame(tick) }
+  function requestDraw() { if (!destroyed && !frame) frame = clock.request(tick) }
   function move(to, endLift) {
     target = clamp(to)
     // Repeated activation/parent acknowledgement does not restart an ongoing
     // flight or its single inertial recovery.
-    if (!quiet() && !press && endLift === 0 && ((motion?.to === target && motion.endLift === 0) || landing?.to === target)) return
-    win.cancelAnimationFrame(frame); frame = 0
-    if (quiet()) { motion = landing = null; position = target; lift = airborne = squash = 0; lightOffsetX = lightOffsetY = 0; draw(); return }
+    if (!quiet() && !press && endLift === 0 && motion?.to === target && motion.endLift === 0) return
+    clock.cancel(frame); frame = 0
+    if (quiet()) { motion = null; position = target; lift = airborne = squash = 0; lightOffsetX = lightOffsetY = 0; draw(); return }
     const distance = Math.abs(target - position)
     if (distance < .0001 && Math.abs(lift - endLift) < .0001 && airborne < .0001 && squash < .0001) { motion = null; lightOffsetX = lightOffsetY = 0; draw(); return }
     lightOffsetX = press ? 0 : lightX - (4 + (position + .5) * tabWidth)
     lightOffsetY = press ? 0 : lightY - (barHeight / 2 - HOP_HELD_LIFT * lift - airHeight * airborne)
-    landing = null
     motion = {from:position,to:target,startLift:lift,startAirborne:airborne,startSquash:squash,endLift,lightOffsetX,lightOffsetY,start:win.performance.now(),duration:distance < .001 ? HOP_SETTLE_DURATION : HOP_TRAVEL_DURATION}
-    if (!press && endLift === 0 && config.qElastic !== false && distance > .001 && target > 0 && target < buttons.length-1) {
-      motion.inertiaStart = hopInertiaStart(motion.from,motion.to,motion.duration)
-    }
-    if (!press && endLift === 0 && config.qElastic !== false && distance > .001 && (target === 0 || target === buttons.length-1)) {
-      motion.wallStart = hopWallStart(motion.from,motion.to,motion.duration,tabWidth)
-    }
+    if (!press && endLift === 0 && config.qElastic !== false && distance > .001) motion.landing = planLanding(motion)
     draw()
-    frame = win.requestAnimationFrame(tick)
+    frame = clock.request(tick)
   }
   function halt() {
-    win.cancelAnimationFrame(frame); frame = 0; motion = landing = null; press = null
+    clock.cancel(frame); frame = 0; motion = null; press = null
     position = target = config.activeIndex; lift = airborne = squash = 0; lightOffsetX = lightOffsetY = 0; draw()
   }
   function resize() {
@@ -260,7 +270,7 @@ export function createHopNavigation(root, initial, select) {
     move(destination, 0)
     if (!cancel) select(destination)
   }
-  listen(root, 'pointerdown', event => {
+  function onPointerDown(event) {
     if (root.dataset.navIdle === 'true' || root.hasAttribute('inert') || root.dataset.navigationHidden === 'true') return
     if (!bar.contains(event.target) || press || event.button > 0 || event.isPrimary === false) return
     const rect = bar.getBoundingClientRect()
@@ -268,8 +278,8 @@ export function createHopNavigation(root, initial, select) {
     press = {id:event.pointerId,startX:event.clientX,x:event.clientX,y:event.clientY,top:rect.top,bottom:rect.bottom,left:rect.left,right:rect.right,index,dragged:false}
     suppressUntil = 0
     move(index, 1)
-  }, {passive:true})
-  listen(doc, 'pointermove', event => {
+  }
+  function onPointerMove(event) {
     if (!press || press.id !== event.pointerId) return
     press.x = event.clientX; press.y = event.clientY
     const dx = event.clientX - press.startX
@@ -283,9 +293,8 @@ export function createHopNavigation(root, initial, select) {
     position = clamp(press.origin + dx / tabWidth)
     if (motion) { motion.from = position; motion.to = position }
     requestDraw()
-  }, {passive:true})
-  listen(doc, 'pointerup', event => finish(event), {passive:true})
-  listen(doc, 'pointercancel', event => finish(event, true), {passive:true})
+  }
+  listenGlassPress(root, listen, onPointerDown, onPointerMove, finish, initial.allowPagePan)
   listen(root, 'click', event => {
     if (root.dataset.navIdle === 'true' || root.hasAttribute('inert') || root.dataset.navigationHidden === 'true') return
     const button = event.target.closest('[data-nav-index]')
@@ -319,21 +328,18 @@ export function createHopNavigation(root, initial, select) {
     if (changedQElastic && next.qElastic === false) {
       // Preserve the rendered position when cancelling inertia mid-recovery.
       // Return to the tab without a snap or a second inflation pulse.
-      if (landing?.kind === 'inertia') {
+      if (motion?.landing && !motion.landing.wall && win.performance.now()-motion.start >= motion.landing.at) {
         motion = {from:position,to:target,startLift:lift,startAirborne:airborne,startSquash:0,endLift:0,
           lightOffsetX,lightOffsetY,start:win.performance.now(),duration:HOP_SETTLE_DURATION,settling:true}
         requestDraw()
       }
-      landing = null; squash = 0
-      if (motion) { motion.startSquash = 0; motion.inertiaStart = motion.wallStart = null }
-      else { win.cancelAnimationFrame(frame); frame = 0 }
+      squash = 0
+      if (motion) { motion.startSquash = 0; motion.landing = null }
+      else { clock.cancel(frame); frame = 0 }
       draw()
     }
-    if (changedQElastic && next.qElastic !== false && motion && !press && motion.endLift === 0 && !motion.settling && Math.abs(motion.to-motion.from) > .001 && target > 0 && target < buttons.length-1) {
-      motion.inertiaStart = Math.max(win.performance.now()-motion.start,hopInertiaStart(motion.from,motion.to,motion.duration))
-    }
-    if (changedQElastic && next.qElastic !== false && motion && !press && motion.endLift === 0 && !motion.settling && Math.abs(motion.to-motion.from) > .001 && (target === 0 || target === buttons.length-1)) {
-      motion.wallStart = Math.max(win.performance.now()-motion.start,hopWallStart(motion.from,motion.to,motion.duration,tabWidth))
+    if (changedQElastic && next.qElastic !== false && motion && !press && motion.endLift === 0 && !motion.settling && Math.abs(motion.to-motion.from) > .001) {
+      motion.landing = planLanding(motion, win.performance.now()-motion.start)
     }
     root.classList.toggle('is-quiet', Boolean(next.reducedMotion))
     if (quiet()) halt()
@@ -342,7 +348,7 @@ export function createHopNavigation(root, initial, select) {
   }
   configure(initial)
   return { configure, suspend:halt, destroy() {
-    destroyed = true; win.cancelAnimationFrame(frame); observer?.disconnect()
+    destroyed = true; clock.cancel(frame); observer?.disconnect()
     listeners.forEach(remove => remove()); lens.destroy(); selectorLens.destroy()
     root.classList.remove('is-hop', 'is-material-clear'); root.style.removeProperty('--glass-press')
     root.style.removeProperty('--glass-material-progress')

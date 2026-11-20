@@ -1,5 +1,5 @@
 <template>
-  <view id="glass-material-preview" class="material-preview" data-comparing="false" :preview-config="previewConfig" :change:preview-config="glassPreview.configure">
+  <view :id="active ? 'glass-material-preview' : undefined" class="material-preview" data-comparing="false" :preview-config="previewConfig" :change:preview-config="glassPreview.configure">
     <view class="preview-stage">
       <view class="sample-days"><text>一</text><text>二</text><text>三</text></view>
       <view class="sample-grid">
@@ -10,7 +10,7 @@
       <view class="preview-lens-root">
         <view class="glass-bar" :style="{ '--glass-tab-count':items.length }" role="group" aria-label="玻璃交互示例，不切换页面">
           <view class="glass-surface" aria-hidden="true"/><view class="glass-edge" aria-hidden="true"><view class="glass-light"/></view><view class="glass-selection" aria-hidden="true"><view><view class="glass-touch-light"><view class="glass-touch-sheen"/></view></view></view>
-          <button v-for="(item,index) in items" :key="item.label" class="nav-item" :data-nav-index="index" :aria-pressed="index === 0 ? 'true' : 'false'" :aria-label="`体验${item.label}动画`" :class="{ active:index === 0 }"><AppIcon :name="item.icon" :size="25" color="#202126"/><text>{{ item.label }}</text></button>
+          <button v-for="(item,index) in items" :key="item.label" class="nav-item" :data-nav-index="active ? index : undefined" :aria-pressed="active ? index === 0 : undefined" :aria-label="`体验${item.label}动画`"><AppIcon :name="item.icon" :size="25" color="#202126"/><text>{{ item.label }}</text></button>
         </view>
       </view>
     </view>
@@ -30,31 +30,66 @@ import { useScheduleStore } from '../stores/schedule'
 import { NAVIGATION_ITEMS } from './navigation-items'
 export default defineComponent({
   components:{ AppIcon },
-  props:{ clarity:{ type:Number, default:DEFAULT_GLASS_CLARITY }, hopPreviewRun:{ type:Number, default:0 }, hopPreviewStop:{ type:Number, default:0 } },
+  props:{ active:{ type:Boolean, default:true }, clarity:{ type:Number, default:DEFAULT_GLASS_CLARITY }, hopPreviewRun:{ type:Number, default:0 }, hopPreviewStop:{ type:Number, default:0 } },
   setup(props) {
     const appearance = useAppearanceStore()
     const schedule = useScheduleStore()
-    return { defaultClarity:DEFAULT_GLASS_CLARITY, previewConfig:computed(() => ({clarity:props.clarity,touchLight:appearance.glassTouchLight,navMotion:appearance.navMotion,qElastic:appearance.qElastic,hopPeak:appearance.navHopPeak,hopPreviewRun:props.hopPreviewRun,hopPreviewStop:props.hopPreviewStop,reducedMotion:schedule.reducedMotion})), items:NAVIGATION_ITEMS }
+    return { defaultClarity:DEFAULT_GLASS_CLARITY, previewConfig:computed(() => ({active:props.active,clarity:props.clarity,touchLight:appearance.glassTouchLight,navMotion:appearance.navMotion,qElastic:appearance.qElastic,hopPeak:appearance.navHopPeak,hopPreviewRun:props.hopPreviewRun,hopPreviewStop:props.hopPreviewStop,reducedMotion:schedule.reducedMotion})), items:NAVIGATION_ITEMS }
   }
 })
 </script>
 
 <script module="glassPreview" lang="renderjs">
 import { createGlassPreview } from './glass-preview.js'
+import { preparePreviewMaps } from './glass-lens.js'
 export default {
-  mounted() {
-    const bind = (attempt = 0) => {
-      const root = document.getElementById('glass-material-preview')
-      if (!root?.querySelector('.glass-surface') || !this.previewValue) {
-        if (attempt < 30) this.previewTimer = setTimeout(() => bind(attempt + 1), 16)
+  mounted() { this.previewMounted = true; this.syncPreview() },
+  beforeUnmount() { this.previewMounted = false; this.cancelMaps?.(); this.stopPreview() },
+  methods: {
+    stopPreview() {
+      clearTimeout(this.previewTimer)
+      this.initialLayout?.disconnect()
+      this.initialLayout = null
+      this.previewController?.destroy()
+      this.previewController = null
+    },
+    syncPreview(attempt = 0) {
+      if (!this.previewMounted || !this.previewValue) return
+      const root = this.previewElement || (this.$el?.querySelector ? this.$el : document.getElementById('glass-material-preview'))
+      if (!this.previewValue.active) {
+        this.stopPreview()
+        if (!this.cancelMaps && root) this.cancelMaps = preparePreviewMaps(root)
         return
       }
-      this.previewController = createGlassPreview(root, this.previewValue)
+      this.cancelMaps?.()
+      this.cancelMaps = null
+      if (this.previewController) { this.previewController.configure(this.previewValue); return }
+      if (this.initialLayout) return
+      const bar = root?.querySelector?.('.glass-bar')
+      if (!bar) {
+        clearTimeout(this.previewTimer)
+        if (attempt < 30) this.previewTimer = setTimeout(() => this.syncPreview(attempt + 1), 16)
+        return
+      }
+      const attach = () => {
+        this.initialLayout?.disconnect()
+        this.initialLayout = null
+        if (this.previewMounted && this.previewValue.active && root.isConnected) this.previewController = createGlassPreview(root, this.previewValue)
+      }
+      // The observer supplies first-paint layout without interrupting mounting.
+      if (typeof ResizeObserver === 'undefined') attach()
+      else {
+        this.initialLayout = new ResizeObserver(attach)
+        this.initialLayout.observe(bar)
+      }
+    },
+    configure(value, previous, owner, instance) {
+      if (!value) return
+      if (instance?.$el?.querySelector) this.previewElement = instance.$el
+      this.previewValue = value
+      this.syncPreview()
     }
-    bind()
-  },
-  beforeUnmount() { clearTimeout(this.previewTimer); this.previewController?.destroy(); this.previewController = null },
-  methods:{ configure(value) { if (!value) return; this.previewValue = value; this.previewController?.configure(value) } }
+  }
 }
 </script>
 
@@ -74,7 +109,7 @@ export default {
 .sample-purple { color:#786498; background:#eae3f3; border-color:#b6a4ce; }
 .preview-lens-root { position:absolute; z-index:1; left:8px; right:8px; top:83px; height:56px; pointer-events:none; }
 .preview-lens-root .glass-bar { pointer-events:auto; }
-.preview-lens-root .nav-item { font-size:10px; }
+.preview-lens-root .nav-item { font-size:10px; touch-action:pan-y; }
 .preview-compare-row { display:flex; align-items:center; justify-content:flex-end; gap:5px; margin-top:3px; }
 .glass-compare { display:flex; align-items:center; justify-content:center; flex-shrink:0; min-height:44px; margin:0; padding:0 8px; border-radius:9px; color:#527da8; font-size:10px; line-height:1.3; background:transparent; touch-action:none; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; }
 .glass-compare::after { border:0; }

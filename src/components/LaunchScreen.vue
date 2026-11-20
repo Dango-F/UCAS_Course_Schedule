@@ -1,5 +1,5 @@
 <template>
-  <view v-if="visible" class="launch-screen" :class="{ 'is-playing': playing, 'is-leaving': leaving, 'is-quiet': quiet }" role="status" aria-label="湖畔课表正在启动" @touchmove.stop.prevent>
+  <view v-if="visible" class="launch-screen" :class="{ 'is-playing': playing, 'is-leaving': leaving, 'is-quiet': quiet }" role="status" aria-label="湖畔课表正在启动" @touchmove.stop.prevent @transitionend.self="onFadeEnd">
     <view class="launch-hero">
       <view class="launch-water" aria-hidden="true"><view /><view /></view>
       <image class="launch-hero-art" src="/static/splash/launch-hero.png" mode="aspectFit" aria-label="湖畔课表，让时间，清晰一点。" @load="settleHero" @error="settleHero" />
@@ -37,6 +37,9 @@ function finish(): void {
 }
 function settleHero(): void { heroSettled.value = true }
 function settleSchool(): void { schoolSettled.value = true }
+function onFadeEnd(event: TransitionEvent): void {
+  if (leaving.value && (!event.propertyName || event.propertyName === 'opacity')) finish()
+}
 async function start(): Promise<void> {
   if (started || !props.ready || !heroSettled.value || !schoolSettled.value) return
   started = true
@@ -46,17 +49,23 @@ async function start(): Promise<void> {
     closeNativeLaunchScreen()
     playing.value = true
     if (quiet.value) { finish(); return }
-    later(() => { leaving.value = true }, 600)
-    later(finish, 820)
+    later(() => {
+      leaving.value = true
+      // A busy launch can delay the start of the 220 ms fade. Measure the
+      // missing-event fallback from the exit, after the view has been updated.
+      void nextTick(() => { if (!disposed && visible.value) later(finish, 400) })
+    }, 600)
   }, 32)
 }
 watch([() => props.ready, heroSettled, schoolSettled], () => { void start() }, { immediate: true, flush: 'post' })
 watch(quiet, reduced => { if (reduced && started) finish() })
-onMounted(() => { later(finish, 1800) })
+onMounted(() => { later(() => { if (!playing.value) finish() }, 1800) })
 onUnmounted(() => { disposed = true; timers.forEach(clearTimeout); timers.clear(); closeNativeLaunchScreen() })
 </script>
 
 <style scoped lang="scss">
+$launch-reveal-duration: 150ms;
+
 .launch-screen { position:fixed; top:0; right:0; bottom:0; left:0; z-index:10000; overflow:hidden; background:#f6f8fc; opacity:1; transition:opacity 220ms cubic-bezier(.2,0,.2,1); }
 .launch-screen.is-leaving { opacity:0; pointer-events:none; }
 .launch-hero { position:absolute; width:220px; height:172px; top:18%; top:max(32px,18%); left:50%; transform:translateX(-50%); }
@@ -65,10 +74,9 @@ onUnmounted(() => { disposed = true; timers.forEach(clearTimeout); timers.clear(
 .launch-water { position:absolute; left:70px; top:8px; width:80px; height:80px; }
 .launch-water > view { position:absolute; top:0; right:0; bottom:0; left:0; border:1px solid rgba(82,125,168,.15); border-radius:18px; opacity:0; }
 .launch-hero-art,.launch-school { opacity:0; }
-.is-playing .launch-hero-art,.is-playing .launch-school { animation:launch-reveal 180ms ease-out both; }
-.is-playing .launch-water > view { animation:launch-ripple 400ms cubic-bezier(.2,.6,.25,1) both; }
-.is-playing .launch-water > view { animation-delay:180ms; }
-.is-playing .launch-water > view:last-child { animation-delay:280ms; }
+.is-playing .launch-hero-art,.is-playing .launch-school { animation:launch-reveal $launch-reveal-duration ease-out both; }
+.is-playing .launch-water > view { animation:launch-ripple 400ms cubic-bezier(.2,.6,.25,1) $launch-reveal-duration both; }
+.is-playing .launch-water > view:last-child { animation-delay:$launch-reveal-duration + 100ms; }
 @keyframes launch-ripple { 0% { transform:scale(.9); opacity:0; } 25% { opacity:.65; } 100% { transform:scale(1.28); opacity:0; } }
 @keyframes launch-reveal { from { opacity:0; } to { opacity:1; } }
 .is-quiet,.is-quiet * { animation:none !important; transition:none !important; }

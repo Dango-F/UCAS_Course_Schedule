@@ -7,7 +7,7 @@
     </view>
 
     <view class="import-scroll-region" :style="{ visibility: browserOpen ? 'hidden' : 'visible', opacity: browserOpen ? 0 : 1, pointerEvents: browserOpen ? 'none' : 'auto' }">
-    <scroll-view class="import-scroll" scroll-y>
+    <NativeScrollArea class="import-scroll">
       <view v-if="stage === 'intro'" class="import-content intro-content">
         <view class="import-art"><AppIcon name="lake" :size="52" color="#527DA8" /><view class="art-divider" /><text>UCAS · LAKESIDE</text></view>
         <text class="import-title">新学期，从这里开始</text>
@@ -25,7 +25,16 @@
         <!-- #ifdef APP-PLUS -->
         <view class="display-mode-card">
           <view><text class="display-mode-title">学校网页显示</text><text class="display-mode-copy">默认手机模式；个人课表入口不便操作时，再切换电脑模式。</text></view>
-          <view class="display-mode-options"><button :class="{ active: displayMode === 'mobile' }" @click="displayMode = 'mobile'"><text>手机模式</text><text>适合小屏</text></button><button :class="{ active: displayMode === 'desktop' }" @click="displayMode = 'desktop'"><text>电脑模式</text><text>完整菜单</text></button></view>
+          <view class="display-mode-options" role="group" aria-label="学校网页显示">
+            <button class="display-mode-option" :class="{ active: displayMode === 'mobile' }" :aria-pressed="displayMode === 'mobile'" @click="displayMode = 'mobile'">
+              <AppIcon name="phone" :size="18" color="#426b8e" /><text>手机模式</text>
+              <AppIcon v-if="displayMode === 'mobile'" name="check" :size="16" color="#426b8e" />
+            </button>
+            <button class="display-mode-option" :class="{ active: displayMode === 'desktop' }" :aria-pressed="displayMode === 'desktop'" @click="displayMode = 'desktop'">
+              <AppIcon name="monitor" :size="18" color="#426b8e" /><text>电脑模式</text>
+              <AppIcon v-if="displayMode === 'desktop'" name="check" :size="16" color="#426b8e" />
+            </button>
+          </view>
         </view>
         <!-- #endif -->
         <button v-if="isApp" class="primary-button" @click="startLogin">打开学校登录页<AppIcon name="arrow" color="white" :size="18" /></button>
@@ -54,10 +63,10 @@
         <view class="form-section">
           <text class="section-heading standalone">确认学期设置</text>
           <text class="form-hint">第一教学周的起始日必须是周一。教务页面通常不能稳定提供这一日期，请按学校校历核对。</text>
-          <text class="field-label">学期名称</text><input v-model="semesterName" class="field-input" maxlength="60" aria-label="学期名称" />
-          <text class="field-label">第一教学周周一</text><input v-model="semesterMonday" class="field-input number" maxlength="10" placeholder="2026-08-31" aria-label="第一教学周周一" />
-          <text class="field-label">教学周数</text><input v-model="semesterWeeks" class="field-input number" type="number" maxlength="2" aria-label="教学周数" />
-          <text class="field-label">校区</text><input v-model="campus" class="field-input" maxlength="60" aria-label="校区" />
+          <view class="import-field"><text class="field-label">学期名称</text><input v-model="semesterName" class="field-input" maxlength="60" aria-label="学期名称" /></view>
+          <view class="import-field"><text class="field-label">第一教学周周一</text><input v-model="semesterMonday" class="field-input number" maxlength="10" placeholder="2026-08-31" aria-label="第一教学周周一" /></view>
+          <view class="import-field"><text class="field-label">教学周数</text><input v-model="semesterWeeks" class="field-input number" type="number" maxlength="2" aria-label="教学周数" /></view>
+          <view class="import-field"><text class="field-label">校区</text><input v-model="campus" class="field-input" maxlength="60" aria-label="校区" /></view>
           <text v-if="saveError" class="save-error">{{ saveError }}</text>
         </view>
 
@@ -65,14 +74,23 @@
         <button class="primary-button" @click="savePreview">确认并保存到手机<AppIcon name="check" :size="18" color="white" /></button>
         <button class="retry-button" @click="backToIntro">放弃本次结果，重新读取</button>
       </view>
-    </scroll-view>
+    </NativeScrollArea>
     </view>
 
     <!-- #ifdef APP-PLUS -->
     <web-view v-if="webviewMounted" :src="browserSrc" :webview-styles="browserWebviewStyles" @error="onWebError" />
     <view class="native-browser-bar" :style="{ opacity: browserOpen ? 1 : 0, pointerEvents: browserOpen ? 'auto' : 'none' }">
-      <view class="browser-message"><view class="browser-status-dot" :class="{ reading }" /><text>{{ browserMessage }}</text></view>
-      <view class="browser-control-row"><view class="browser-mode-switch"><button :class="{ active: displayMode === 'mobile' }" :disabled="modeChanging" @tap.stop="switchDisplayMode('mobile')">手机</button><button :class="{ active: displayMode === 'desktop' }" :disabled="modeChanging" @tap.stop="switchDisplayMode('desktop')">电脑</button></view><view class="browser-actions"><button class="native-cancel" :disabled="modeChanging" @click="finishLogin">结束</button><button class="native-read" :disabled="reading || modeChanging" @click="readSchedule">{{ reading ? '读取中' : '读取当前课表' }}</button></view></view>
+      <view class="browser-message"><view class="browser-status-dot" :class="{ reading, quiet:store.reducedMotion }" /><text>{{ browserMessage }}</text></view>
+      <view class="browser-control-row">
+        <view class="browser-mode-switch" role="group" aria-label="学校网页显示">
+          <button class="browser-tool" :class="{ active: displayMode === 'mobile' }" aria-label="手机模式" title="手机模式" :aria-pressed="displayMode === 'mobile'" :disabled="modeChanging" @tap.stop="switchDisplayMode('mobile')"><AppIcon name="phone" :size="21" :color="displayMode === 'mobile' ? '#315d89' : '#647a90'" /></button>
+          <button class="browser-tool" :class="{ active: displayMode === 'desktop' }" aria-label="电脑模式" title="电脑模式" :aria-pressed="displayMode === 'desktop'" :disabled="modeChanging" @tap.stop="switchDisplayMode('desktop')"><AppIcon name="monitor" :size="21" :color="displayMode === 'desktop' ? '#315d89' : '#647a90'" /></button>
+        </view>
+        <view class="browser-actions">
+          <button class="browser-tool native-cancel" aria-label="关闭教务网页" title="关闭教务网页" :disabled="modeChanging" @click="finishLogin"><AppIcon name="close" :size="20" /></button>
+          <button class="native-read" :disabled="reading || modeChanging" @click="readSchedule">{{ reading ? '读取中' : '读取当前课表' }}</button>
+        </view>
+      </view>
     </view>
     <!-- #endif -->
   </view>
@@ -83,6 +101,7 @@
 <script setup lang="ts">
 import { computed, getCurrentInstance, onUnmounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
+import NativeScrollArea from './NativeScrollArea.vue'
 import { useScheduleStore } from '../stores/schedule'
 import {
   buildScheduleFromUcasImport,
@@ -121,17 +140,12 @@ const saveError = ref('')
 const loginUrl = ref(UCAS_SEP_LOGIN_URL)
 const browserSrc = ref(UCAS_SEP_LOGIN_URL)
 const importHeaderTopSpacing = 12
-let webTop = '60px'
-let webBottom = '92px'
 
 /* #ifdef APP-PLUS */
 isApp.value = true
-const nativeSystemInfo = uni.getSystemInfoSync() as unknown as { statusBarHeight?: number; safeAreaInsets?: { bottom?: number } }
-webTop = String((nativeSystemInfo.statusBarHeight || 0) + 60 + importHeaderTopSpacing) + 'px'
-webBottom = String(92 + (nativeSystemInfo.safeAreaInsets?.bottom || 0)) + 'px'
 /* #endif */
 
-const browserWebviewStyles = { top: webTop, bottom: webBottom, left: '0px', right: '0px', opacity: 1, scalable: false, softinputMode: 'adjustResize' }
+const browserWebviewStyles = { top: '60px', bottom: '92px', left: '0px', right: '0px', opacity: 1, scalable: false, softinputMode: 'adjustResize' }
 const platformNote = isApp.value
   ? '请在 App 内完成 SEP 登录，并从选课系统打开“选修课程”或“个人课表”。读取前可以先核对登录状态。'
   : '网页预览不接入学校登录。真实导入需要在 HBuilderX 运行到 Android 手机后验证。'
@@ -258,10 +272,16 @@ function releaseBrowserWebview(): void {
 }
 function initializeServices(): void {
   if (webviewManager || !instance) return
+  // Read the current safe area when the school browser is first requested.
+  // #ifdef APP-PLUS
+  const info = uni.getSystemInfoSync() as unknown as { statusBarHeight?: number; safeAreaInsets?: { bottom?: number } }
+  browserWebviewStyles.top = (60 + importHeaderTopSpacing + (info.statusBarHeight || 0)) + 'px'
+  browserWebviewStyles.bottom = (92 + (info.safeAreaInsets?.bottom || 0)) + 'px'
+  // #endif
   webviewManager = new UcasWebviewManager({
     instance,
-    top: webTop,
-    bottom: webBottom,
+    top: browserWebviewStyles.top,
+    bottom: browserWebviewStyles.bottom,
     isOpen: () => browserOpen.value,
     mode: () => displayMode.value,
     phase: () => importSession?.currentPhase || null,
@@ -408,7 +428,6 @@ function handleBackPress(): boolean {
 }
 function goBack(): void { if (!handleBackPress()) emit('close') }
 defineExpose({ handleBackPress, goBack })
-initializeServices()
 onUnmounted(() => {
   importSession?.cancel()
   webviewManager?.release()
@@ -427,21 +446,74 @@ onUnmounted(() => {
 .import-content { padding:30px 28px calc(32px + env(safe-area-inset-bottom)); min-height:100%; }
 .intro-content { display:flex; flex-direction:column; padding-top:2px; }
 .import-art { width:100%; height:auto; margin:0 auto 10px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; }
-.art-divider { height:1px; width:36px; background:#d0deeb; }.import-art text { font-size:7px; letter-spacing:1.2px; color:#89a0b5; }
-.import-title { display:block; font-size:24px; font-weight:650; text-align:center; }.import-subtitle { display:block; margin-top:8px; color:#8b9aaa; font-size:12px; line-height:1.7; text-align:center; }
-.steps { margin:22px 0 16px; }.step { display:flex; gap:12px; margin-bottom:16px; }.step-number { width:28px; height:28px; border:1px solid #dfe8f1; border-radius:9px; color:#527DA8; font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:#fff; }.step-title { font-size:14px; font-weight:600; line-height:28px; }.step-description { display:block; color:#8899aa; font-size:11px; line-height:1.7; margin-top:2px; }
-.privacy-note,.status-note,.partial-note,.save-note { display:flex; gap:10px; align-items:flex-start; padding:12px; border-radius:12px; font-size:11px; line-height:1.7; margin-bottom:10px; }.privacy-note { background:#eaf2ee; color:#6b8c7d; }.status-note { border:1px solid #e2e9f1; color:#8999aa; margin-bottom:16px; }.privacy-note .app-icon,.status-note .app-icon,.partial-note .app-icon,.save-note .app-icon { margin-top:2px; }
-.display-mode-card { margin:-6px 0 14px; padding:12px; border:1px solid #dce7f0; border-radius:14px; background:#edf3f8; }.display-mode-title { display:block; color:#526f8c; font-size:12px; font-weight:600; }.display-mode-copy { display:block; margin-top:4px; color:#8093a5; font-size:10px; line-height:1.7; }.display-mode-options { display:flex; gap:8px; margin-top:10px; }.display-mode-options button { flex:1; min-height:48px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; border:1px solid #dce5ee !important; border-radius:10px; color:#8494a5; background:#ffffffa8 !important; font-size:11px; }.display-mode-options button text:last-child { font-size:9px; opacity:.75; }.display-mode-options button.active { color:#ffffff; border-color:#527DA8 !important; background:#527DA8 !important; }
+.art-divider { height:1px; width:36px; background:#d0deeb; }
+.import-art text { font-size:7px; letter-spacing:1.2px; color:#89a0b5; }
+.import-title { display:block; font-size:24px; font-weight:650; text-align:center; }
+.import-subtitle { display:block; margin-top:8px; color:#8b9aaa; font-size:12px; line-height:1.7; text-align:center; }
+.steps { margin:22px 0 16px; }
+.step { display:flex; gap:12px; margin-bottom:16px; }
+.step-number { width:28px; height:28px; border:1px solid #dfe8f1; border-radius:9px; color:#527DA8; font-size:12px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:#fff; }
+.step-title { font-size:14px; font-weight:600; line-height:28px; }
+.step-description { display:block; color:#8899aa; font-size:11px; line-height:1.7; margin-top:2px; }
+.privacy-note,.status-note,.partial-note,.save-note { display:flex; gap:10px; align-items:flex-start; padding:12px; border-radius:12px; font-size:11px; line-height:1.7; margin-bottom:10px; }
+.privacy-note { background:#eaf2ee; color:#6b8c7d; }
+.status-note { border:1px solid #e2e9f1; color:#8999aa; margin-bottom:16px; }
+.privacy-note .app-icon,.status-note .app-icon,.partial-note .app-icon,.save-note .app-icon { margin-top:2px; }
+.display-mode-card { margin:0 0 14px; }
+.display-mode-title { display:block; color:#344b64; font-size:13px; font-weight:650; }
+.display-mode-copy { display:block; margin-top:4px; color:#60748a; font-size:11px; line-height:1.6; }
+.display-mode-options { margin-top:8px; border-top:1px solid #e2eaf2; }
+.display-mode-option { width:100%; min-height:44px; display:flex; align-items:center; gap:10px; padding:0 2px; border-bottom:1px solid #e2eaf2; color:#315d89; font-size:12px; text-align:left; }
+.display-mode-option text { flex:1; }
 .import-footer { display:block; text-align:center; font-size:10px; color:#a0adbb; margin-top:14px; }
-.review-mark { display:flex; align-items:center; gap:13px; margin:4px 0 15px; }.review-icon { width:44px; height:44px; display:flex; justify-content:center; align-items:center; border-radius:15px; background:#e7eff7; }.review-eyebrow { display:block; color:#527DA8; font-size:10px; letter-spacing:.8px; }.review-title { display:block; margin-top:4px; font-size:21px; font-weight:650; }.review-copy { display:block; font-size:12px; color:#7f90a2; line-height:1.8; }
-.import-summary { display:flex; justify-content:space-between; padding:19px 8px; margin:21px 0; border-top:1px solid #e6edf4; border-bottom:1px solid #e6edf4; }.import-summary view { display:flex; flex:1; flex-direction:column; align-items:center; gap:7px; border-right:1px solid #edf1f5; }.import-summary view:last-child { border:0; }.import-summary text:first-child { font-size:22px; color:#527DA8; font-weight:600; }.import-summary text:last-child { font-size:9px; color:#8c9aaa; }
-.preview-section,.form-section { margin-top:24px; }.section-heading { display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:600; margin-bottom:12px; }.section-heading text:last-child { color:#91a0b1; font-size:10px; font-weight:400; }.section-heading.standalone { display:block; margin-bottom:9px; }
-.course-preview-row { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid #edf1f5; }.course-preview-dot { width:6px; height:6px; flex-shrink:0; border-radius:50%; background:#8aacc8; }.course-preview-row>view:last-child { min-width:0; }.course-preview-row text { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; }.course-preview-row text:last-child { margin-top:4px; color:#8d9baa; font-size:10px; }.more-courses { display:block; padding-top:12px; font-size:10px; color:#8798a9; }
-.partial-note { margin-top:20px; background:#fbf3e5; color:#94734d; }.partial-warning { margin-top:10px; background:#edf4fa; color:#607d98; }.partial-note>view,.partial-warning>view { min-width:0; flex:1; }.partial-note text,.partial-warning text { display:block; font-size:10px; line-height:1.65; white-space:normal; overflow-wrap:anywhere; }.partial-note text:first-child,.partial-warning text:first-child { font-size:11px; margin-bottom:4px; font-weight:600; }
-.form-hint { display:block; font-size:10px; color:#8a99a9; line-height:1.8; margin-bottom:16px; }.field-label { display:block; font-size:11px; color:#8292a4; margin:15px 0 8px; }.field-input { width:100%; height:46px; border:1px solid #e3eaf2; border-radius:11px; background:#fff; padding:0 13px; font-size:14px; }.save-error { display:block; color:#b35f50; font-size:11px; line-height:1.7; margin-top:14px; }
-.save-note { margin:25px 0 14px; background:#eaf2ee; color:#6b8c7d; }.retry-button { width:100%; min-height:44px; margin-top:7px; color:#718096; font-size:12px; }
-.native-browser-bar { position:fixed; z-index:2; left:0; right:0; bottom:0; min-height:calc(92px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; justify-content:flex-start; gap:8px; padding:10px 16px calc(10px + env(safe-area-inset-bottom)); background:#ffffff; border-top:1px solid #e5edf4; box-shadow:0 -8px 24px #45627a0c; }.browser-message { display:flex; align-items:center; gap:8px; min-height:21px; color:#778899; font-size:10px; line-height:1.5; }.browser-status-dot { width:6px; height:6px; border-radius:50%; background:#9db4c8; flex-shrink:0; }.browser-status-dot.reading { background:#527DA8; animation:pulse 1.1s ease-in-out infinite; }.browser-control-row,.browser-actions,.browser-mode-switch { display:flex; align-items:center; }.browser-control-row { gap:8px; min-height:42px; }.browser-mode-switch { flex-shrink:0; gap:2px; padding:2px; border-radius:12px; background:#edf2f7; }.browser-mode-switch button { width:42px; height:38px; display:flex; align-items:center; justify-content:center; border-radius:10px; color:#7b8d9f; font-size:10px; line-height:1; }.browser-mode-switch button.active { color:#527DA8; background:#ffffff; box-shadow:0 1px 4px #44617614; }.browser-actions { flex:1; align-self:stretch; gap:8px; }.browser-actions button { min-height:42px; display:flex !important; align-items:center !important; justify-content:center !important; border-radius:12px; font-size:12px; line-height:1 !important; }.native-cancel { width:58px; color:#718096; border:1px solid #e5ecf3 !important; }.native-read { flex:1; background:#527DA8 !important; color:white; font-weight:600; }
+.review-mark { display:flex; align-items:center; gap:13px; margin:4px 0 15px; }
+.review-icon { width:44px; height:44px; display:flex; justify-content:center; align-items:center; border-radius:15px; background:#e7eff7; }
+.review-eyebrow { display:block; color:#527DA8; font-size:10px; letter-spacing:.8px; }
+.review-title { display:block; margin-top:4px; font-size:21px; font-weight:650; }
+.review-copy { display:block; font-size:12px; color:#7f90a2; line-height:1.8; }
+.import-summary { display:flex; justify-content:space-between; padding:19px 8px; margin:21px 0; border-top:1px solid #e6edf4; border-bottom:1px solid #e6edf4; }
+.import-summary view { display:flex; flex:1; flex-direction:column; align-items:center; gap:7px; border-right:1px solid #edf1f5; }
+.import-summary view:last-child { border:0; }
+.import-summary text:first-child { font-size:22px; color:#527DA8; font-weight:600; }
+.import-summary text:last-child { font-size:9px; color:#8c9aaa; }
+.preview-section,.form-section { margin-top:24px; }
+.section-heading { display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:600; margin-bottom:12px; }
+.section-heading text:last-child { color:#91a0b1; font-size:10px; font-weight:400; }
+.section-heading.standalone { display:block; margin-bottom:9px; }
+.course-preview-row { display:flex; align-items:center; gap:10px; padding:12px 0; border-bottom:1px solid #edf1f5; }
+.course-preview-dot { width:6px; height:6px; flex-shrink:0; border-radius:50%; background:#8aacc8; }
+.course-preview-row>view:last-child { min-width:0; }
+.course-preview-row text { display:block; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:12px; }
+.course-preview-row text:last-child { margin-top:4px; color:#8d9baa; font-size:10px; }
+.more-courses { display:block; padding-top:12px; font-size:10px; color:#8798a9; }
+.partial-note { margin-top:20px; background:#fbf3e5; color:#94734d; }
+.partial-warning { margin-top:10px; background:#edf4fa; color:#607d98; }
+.partial-note>view,.partial-warning>view { min-width:0; flex:1; }
+.partial-note text,.partial-warning text { display:block; font-size:10px; line-height:1.65; white-space:normal; overflow-wrap:anywhere; }
+.partial-note text:first-child,.partial-warning text:first-child { font-size:11px; margin-bottom:4px; font-weight:600; }
+.form-hint { display:block; font-size:11px; color:#60748a; line-height:1.7; margin-bottom:12px; }
+.import-field { display:grid; grid-template-columns:minmax(92px,auto) minmax(0,1fr); align-items:center; gap:9px; padding:0 10px; border-top:1px solid #e2eaf2; background:#fff; }
+.import-field:last-of-type { border-bottom:1px solid #e2eaf2; }
+.field-label { color:#536b85; font-size:12px; }
+.field-input { width:100%; min-width:0; height:46px; font-size:14px; text-align:right; }
+.save-error { display:block; color:#b35f50; font-size:11px; line-height:1.7; margin-top:14px; }
+.save-note { margin:25px 0 14px; background:#eaf2ee; color:#6b8c7d; }
+.retry-button { width:100%; min-height:44px; margin-top:7px; color:#718096; font-size:12px; }
+.native-browser-bar { position:fixed; z-index:2; left:0; right:0; bottom:0; min-height:calc(92px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:6px; padding:10px 16px calc(10px + env(safe-area-inset-bottom)); background:#fff; border-top:1px solid #e2eaf2; }
+.browser-message { display:flex; align-items:center; gap:8px; min-height:21px; color:#60748a; font-size:10px; line-height:1.5; }
+.browser-status-dot { width:6px; height:6px; border-radius:50%; background:#9db4c8; flex-shrink:0; }
+.browser-status-dot.reading { background:#527da8; animation:pulse 1.1s ease-in-out infinite; }
+.browser-status-dot.quiet { animation:none; }
+@media (prefers-reduced-motion:reduce) { .browser-status-dot.reading { animation:none; } }
+.browser-control-row,.browser-mode-switch { display:flex; align-items:center; }
+.browser-control-row { gap:6px; }
+.browser-mode-switch { flex:none; padding-right:5px; border-right:1px solid #e2eaf2; }
+.browser-tool { position:relative; flex:none; width:44px; height:44px; display:grid; place-items:center; }
+.browser-tool[aria-pressed="true"]::before { content:''; position:absolute; bottom:4px; width:16px; height:2px; border-radius:1px; background:#426b8e; }
+.native-read { flex:1; min-width:0; min-height:44px; display:grid; place-items:center; color:#315d89; font-size:13px; font-weight:650; }
 @keyframes pulse { 50% { transform:scale(1.6); opacity:.4; } }
 .import-page.embedded .native-browser-bar { position:absolute; }
 @media (min-width:600px) { .import-page { border-left:1px solid #dfe7ef; border-right:1px solid #dfe7ef; } }
+.browser-actions { display:flex; flex:1; min-width:0; align-items:center; gap:6px; }
+.native-cancel { order:1; }
 </style>

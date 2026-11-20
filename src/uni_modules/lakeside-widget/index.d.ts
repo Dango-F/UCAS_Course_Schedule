@@ -3,6 +3,7 @@ export interface UpdateOptions { widgetId: number; optionsJson: string; complete
 export function syncSnapshot(options: SyncOptions): void
 export function getWidgetState(): string
 export function updateWidgetOptions(options: UpdateOptions): void
-export function refreshWidgets(): void
+export function scheduleCourseRefresh(options: { complete: (resultJson: string) => void }): void
+export function openCourseRefreshSettings(): boolean
 export function requestPinWidget(kind: string): string
 export function consumePendingAction(): string | null

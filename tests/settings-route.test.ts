@@ -1,6 +1,6 @@
 import { nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createSettingsRoute, SETTINGS_ROUTE_DURATION, SETTINGS_ROUTE_EXIT_DURATION } from '../src/components/settings-route'
+import { createSettingsRoute, SETTINGS_ROUTE_DURATION, SETTINGS_ROUTE_EXIT_DURATION, IMPORT_ROUTE_EXIT_DURATION } from '../src/components/settings-route'
 
 describe('settings page stack', () => {
   beforeEach(() => vi.useFakeTimers())
@@ -9,14 +9,10 @@ describe('settings page stack', () => {
     const route = createSettingsRoute(() => false)
     route.open('display')
     expect(route.section.value).toBe('display')
-    expect(route.shown.value).toBe(false)
     await nextTick()
-    vi.advanceTimersByTime(32)
-    expect(route.shown.value).toBe(true)
     route.transitionEnd()
     expect(route.phase.value).toBe('open')
     expect(route.back()).toBe(true)
-    expect(route.shown.value).toBe(false)
     expect(route.section.value).toBe('display')
     expect(route.phase.value).toBe('leaving')
     route.transitionEnd()
@@ -27,7 +23,7 @@ describe('settings page stack', () => {
   })
   it('consumes repeated back presses and rejects clicks behind the detail', async () => {
     const route = createSettingsRoute(() => false)
-    route.open('about'); await nextTick(); vi.advanceTimersByTime(32)
+    route.open('about'); await nextTick()
     expect(route.open('semester')).toBe(false)
     route.back()
     expect(route.back()).toBe(true)
@@ -39,14 +35,16 @@ describe('settings page stack', () => {
   })
   it('opens another detail immediately during return and ignores the old exit timer', async () => {
     const route = createSettingsRoute(() => false, SETTINGS_ROUTE_EXIT_DURATION)
-    route.open('display'); await nextTick(); vi.advanceTimersByTime(32)
+    route.open('display'); await nextTick()
     route.transitionEnd()
     route.back()
     expect(route.phase.value).toBe('leaving')
+    const oldEpoch = route.epoch.value
     expect(route.open('appearance')).toBe(true)
+    route.transitionEnd(oldEpoch, 'leaving')
     expect(route.section.value).toBe('appearance')
     expect(route.phase.value).toBe('entering')
-    await nextTick(); vi.advanceTimersByTime(32)
+    await nextTick()
     route.transitionEnd()
     vi.advanceTimersByTime(SETTINGS_ROUTE_EXIT_DURATION + 160)
     expect(route.section.value).toBe('appearance')
@@ -58,7 +56,7 @@ describe('settings page stack', () => {
   })
   it('removes the offscreen detail shortly after the shorter exit when transitionend is missing', async () => {
     const route = createSettingsRoute(() => false, SETTINGS_ROUTE_EXIT_DURATION)
-    route.open('display'); await nextTick(); vi.advanceTimersByTime(32)
+    route.open('display'); await nextTick()
     route.transitionEnd()
     route.back()
     vi.advanceTimersByTime(SETTINGS_ROUTE_EXIT_DURATION)
@@ -72,7 +70,23 @@ describe('settings page stack', () => {
     route.open('preview'); route.back()
     await nextTick(); vi.runAllTimers()
     expect(route.section.value).toBe('home')
-    expect(route.shown.value).toBe(false)
+    route.dispose()
+  })
+  it('waits for the view timeline while paused or backgrounded, including a reversed entrance', async () => {
+    const route = createSettingsRoute(() => false)
+    route.open('appearance')
+    const epoch = route.epoch.value
+    route.viewStarted(epoch, 'entering')
+    await nextTick()
+    vi.advanceTimersByTime(2000)
+    expect(route.phase.value).toBe('entering')
+    route.back()
+    route.viewStarted(epoch, 'leaving')
+    route.transitionEnd(epoch, 'entering')
+    vi.advanceTimersByTime(2000)
+    expect(route.section.value).toBe('appearance')
+    route.transitionEnd(epoch, 'leaving')
+    expect(route.section.value).toBe('home')
     route.dispose()
   })
   it('reverses an in-progress entrance without replacing its content', async () => {
@@ -85,14 +99,18 @@ describe('settings page stack', () => {
     expect(route.section.value).toBe('home')
     route.dispose()
   })
-  it('finishes missing transition events only after the duration plus grace period', async () => {
-    const route = createSettingsRoute(() => false)
-    route.open('display'); await nextTick(); vi.runAllTimers()
+  it('uses the settings return duration for import and settles if transition events are missing', async () => {
+    expect(IMPORT_ROUTE_EXIT_DURATION).toBe(SETTINGS_ROUTE_EXIT_DURATION)
+    const route = createSettingsRoute(() => false, IMPORT_ROUTE_EXIT_DURATION)
+    route.open('preview'); await nextTick()
+    vi.advanceTimersByTime(SETTINGS_ROUTE_DURATION)
+    expect(route.phase.value).toBe('entering')
+    vi.advanceTimersByTime(160)
     expect(route.phase.value).toBe('open')
     route.back()
-    vi.advanceTimersByTime(SETTINGS_ROUTE_DURATION)
-    expect(route.section.value).toBe('display')
-    vi.advanceTimersByTime(160)
+    vi.advanceTimersByTime(SETTINGS_ROUTE_EXIT_DURATION)
+    expect(route.section.value).toBe('preview')
+    vi.advanceTimersByTime(48)
     expect(route.section.value).toBe('home')
     route.dispose()
   })
@@ -100,7 +118,6 @@ describe('settings page stack', () => {
     let reduced = true
     const route = createSettingsRoute(() => reduced)
     route.open('appearance')
-    expect(route.shown.value).toBe(true)
     expect(route.phase.value).toBe('open')
     route.back()
     expect(route.section.value).toBe('home')
@@ -109,7 +126,6 @@ describe('settings page stack', () => {
     reduced = true; route.disableMotion()
     await nextTick(); vi.runAllTimers()
     expect(route.phase.value).toBe('open')
-    expect(route.shown.value).toBe(true)
     reduced = false; route.back()
     reduced = true; route.disableMotion()
     expect(route.section.value).toBe('home')
@@ -119,7 +135,6 @@ describe('settings page stack', () => {
     const route = createSettingsRoute(() => false)
     route.open('preview'); route.dispose()
     await nextTick(); vi.runAllTimers()
-    expect(route.shown.value).toBe(false)
     expect(route.open('about')).toBe(false)
     expect(vi.getTimerCount()).toBe(0)
   })

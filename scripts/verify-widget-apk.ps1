@@ -3,7 +3,8 @@ param(
     [string]$JavaPath = 'java',
     [string]$ApkSignerJar = 'E:/HBuilderX/plugins/app-safe-pack/apksigner.jar',
     [string]$ExpectedSigner = '4c6e0458bbd1f045fac39cec61f21eb132e49f4260fa4e4af437d94f593bdfa7',
-    [switch]$CustomBase
+    [switch]$CustomBase,
+    [switch]$WriteUpdateManifest
 )
 $ErrorActionPreference = 'Stop'
 $widgetRoot = Split-Path $PSScriptRoot -Parent
@@ -20,21 +21,32 @@ $widgetManifest = Invoke-WidgetAapt @('dump','xmltree',$widgetApk,'--file','Andr
 $widgetResources = Invoke-WidgetAapt @('dump','resources',$widgetApk)
 $widgetChecks = [ordered]@{}
 $widgetChecks['packageName'] = $widgetBadging.Contains("package: name='ucas.course.schedule'")
+if ($WriteUpdateManifest) {
+    if ($CustomBase) { throw 'An update manifest requires a signed release APK.' }
+    $releaseApkName = [IO.Path]::GetFileName($widgetApk)
+    if ($releaseApkName -cnotmatch '^[A-Za-z0-9_-][A-Za-z0-9._-]*\.apk$') { throw 'Use an ASCII APK filename with letters, digits, periods, underscores or hyphens before generating update.json.' }
+    $releaseSource = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $widgetRoot 'src/manifest.json') | ConvertFrom-Json
+    $releaseVersion = [regex]::Match($widgetBadging, "(?m)^package: [^\r\n]*?versionCode='(\d+)' versionName='([^']+)'")
+    $widgetChecks['release.version'] = $releaseVersion.Success -and $releaseVersion.Groups[1].Value -eq [string]$releaseSource.versionCode -and $releaseVersion.Groups[2].Value -ceq $releaseSource.versionName
+    if (-not $widgetChecks['release.version']) { throw "APK version does not match src/manifest.json ($($releaseSource.versionName), code $($releaseSource.versionCode))." }
+}
 $widgetChecks['minSdk23'] = $widgetBadging.Contains("minSdkVersion:'23'")
-$widgetChecks['nativeApiVersion2'] = $widgetManifest -match 'com\.lakeside\.widget\.API_VERSION[^\r\n]*\r?\n[^\r\n]*android:value[^\r\n]*=(?:\(type 0x10\))?(?:0x2|2)(?:\s|$)'
-$widgetComponents = @('LargeWidgetProvider','SmallWidgetProvider','WidgetPinReceiver','WidgetEnvironmentReceiver','WidgetCollectionService','WidgetEntryActivity')
+$widgetChecks['nativeApiVersion5'] = $widgetManifest -match 'com\.lakeside\.widget\.API_VERSION[^\r\n]*\r?\n[^\r\n]*android:value[^\r\n]*=(?:\(type 0x10\))?(?:0x5|5)(?:\s|$)'
+$widgetComponents = @('LargeWidgetProvider','SmallWidgetProvider','WidgetPinReceiver','WidgetEnvironmentReceiver','WidgetCourseAlarmReceiver','WidgetCollectionService','WidgetEntryActivity')
 foreach ($component in $widgetComponents) { $widgetChecks["manifest.$component"] = $widgetManifest.Contains("com.lakeside.widget.$component") }
-$widgetChecks['widgetMetadata'] = ([regex]::Matches($widgetManifest,'android.appwidget.provider').Count -eq 2)
+# aapt2 can print both the decoded value and its "(Raw: ...)" copy on one line.
+$widgetChecks['widgetMetadata'] = ([regex]::Matches($widgetManifest,'(?m)^\s*A: [^\r\n]*android:name\([^)]*\)="android\.appwidget\.provider"').Count -eq 2)
 $widgetChecks['bootPermission'] = $widgetManifest.Contains('android.permission.RECEIVE_BOOT_COMPLETED')
+$widgetChecks['exactAlarmPermission'] = $widgetManifest.Contains('android.permission.SCHEDULE_EXACT_ALARM')
+$widgetChecks['exactAlarmPermissionChangedReceiver'] = $widgetManifest.Contains('android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED')
 $widgetChecks['remoteViewsServicePermission'] = $widgetManifest.Contains('android.permission.BIND_REMOTEVIEWS')
-foreach ($resource in @('layout/ls_widget_large','layout/ls_widget_small','layout/ls_widget_small_capped','layout/ls_widget_small_extra_row','layout/ls_widget_small_compact','layout/ls_widget_small_dense','layout/ls_widget_small_medium','layout/ls_widget_course','layout/ls_widget_status_active','layout/ls_widget_status_active_static','layout/ls_widget_status_pending','layout/ls_widget_status_ended','layout/ls_widget_status_active_small','layout/ls_widget_status_active_small_static','layout/ls_widget_status_pending_small','layout/ls_widget_status_ended_small','xml/ls_widget_large_info','xml/ls_widget_small_info','drawable/ls_widget_background','drawable/ls_widget_day_button','id/ls_widget_day','id/ls_small_second','id/ls_small_content_second','id/ls_small_status','id/ls_small_third','id/ls_small_fourth','id/ls_small_line_gap','id/ls_small_edge_gap_top','id/ls_small_edge_gap_bottom','id/ls_small_one_bottom_gap','id/ls_small_content_third','id/ls_small_content_fourth','id/ls_course_status','dimen/ls_widget_default_width','dimen/ls_widget_small_spacing_cap','id/ls_small_capped_content','id/ls_small_adaptive_content','id/ls_small_more_courses','id/ls_small_extra_row','dimen/ls_widget_small_row_min')) {
+foreach ($resource in @('layout/ls_widget_initial_large','layout/ls_widget_initial_small','layout/ls_widget_large','layout/ls_widget_small','layout/ls_widget_small_capped','layout/ls_widget_small_extra_row','layout/ls_widget_small_compact','layout/ls_widget_small_dense','layout/ls_widget_small_medium','layout/ls_widget_course','layout/ls_widget_status_active','layout/ls_widget_status_active_static','layout/ls_widget_status_pending','layout/ls_widget_status_ended','layout/ls_widget_status_active_small','layout/ls_widget_status_active_small_static','layout/ls_widget_status_pending_small','layout/ls_widget_status_ended_small','xml/ls_widget_large_info','xml/ls_widget_small_info','drawable/ls_widget_background','drawable/ls_widget_day_button','id/ls_widget_day','id/ls_small_second','id/ls_small_content_second','id/ls_small_status','id/ls_small_third','id/ls_small_fourth','id/ls_small_line_gap','id/ls_small_edge_gap_top','id/ls_small_edge_gap_bottom','id/ls_small_one_bottom_gap','id/ls_small_content_third','id/ls_small_content_fourth','id/ls_course_status','dimen/ls_widget_default_width','dimen/ls_widget_small_spacing_cap','id/ls_small_capped_content','id/ls_small_adaptive_content','id/ls_small_more_courses','id/ls_small_extra_row','dimen/ls_widget_small_row_min')) {
     $widgetChecks["resource.$resource"] = $widgetResources.Contains($resource)
 }
 
 # Read DEX class definitions, rather than merely looking for referenced class names.
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $widgetClasses = [Collections.Generic.HashSet[string]]::new()
-$widgetSuperclasses = @{}
 $widgetZip = [IO.Compression.ZipFile]::OpenRead($widgetApk)
 try {
     foreach ($entry in $widgetZip.Entries | Where-Object { $_.FullName -match '^classes\d*\.dex$' }) {
@@ -58,7 +70,6 @@ try {
             $typeIndex = [BitConverter]::ToUInt32($bytes,$classesOffset+32*$index)
             $descriptor = Get-WidgetDexType $typeIndex
             [void]$widgetClasses.Add($descriptor)
-            $widgetSuperclasses[$descriptor] = Get-WidgetDexType ([BitConverter]::ToUInt32($bytes,$classesOffset+32*$index+8))
         }
     }
     # A custom base receives JS assets from HBuilderX at run time. A release APK must bundle them.
@@ -73,12 +84,10 @@ try {
         $widgetChecks['packageMode'] = if ($CustomBase) { $widgetIsDebugBase } else { -not $widgetIsDebugBase }
     } else { $widgetChecks['packageMode'] = $false }
 } finally { $widgetZip.Dispose() }
-foreach ($component in ($widgetComponents + @('WidgetRefreshWorker','LakesideWidgetBridge'))) {
+foreach ($component in ($widgetComponents + @('LakesideWidgetBridge'))) {
     $widgetChecks["dex.$component"] = $widgetClasses.Contains("Lcom/lakeside/widget/$component;")
 }
-# R8 may rename AndroidX classes. Check that the actual worker superclass is packaged.
-$widgetWorkerParent = $widgetSuperclasses['Lcom/lakeside/widget/WidgetRefreshWorker;']
-$widgetChecks['dex.workerSuperclassPackaged'] = $widgetWorkerParent -and $widgetWorkerParent -ne 'Ljava/lang/Object;' -and $widgetClasses.Contains($widgetWorkerParent)
+$widgetChecks['dex.noLegacyPeriodicWorker'] = -not $widgetClasses.Contains('Lcom/lakeside/widget/WidgetRefreshWorker;')
 if (-not (Test-Path -LiteralPath $ApkSignerJar)) { throw 'Pass -ApkSignerJar pointing to Android apksigner.jar.' }
 $widgetSignature = & $JavaPath -jar $ApkSignerJar verify --print-certs $widgetApk 2>&1
 $widgetSignatureOk = $LASTEXITCODE -eq 0
@@ -100,3 +109,9 @@ if ($widgetFailed.Count) {
     exit 1
 }
 Write-Host 'Package identity, signing, widget components, DEX classes and resources passed static inspection.'
+if ($WriteUpdateManifest) {
+    $releasePath = Join-Path (Split-Path -Parent $widgetApk) 'update.json'
+    $releaseMetadata = [ordered]@{ versionCode=[int]$releaseSource.versionCode; versionName=$releaseSource.versionName; apk=$releaseApkName; sha256=$widgetReport.sha256.ToLowerInvariant() }
+    [IO.File]::WriteAllText($releasePath, ($releaseMetadata | ConvertTo-Json), [Text.UTF8Encoding]::new($false))
+    Write-Host "Release assets: $widgetApk and $releasePath"
+}

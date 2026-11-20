@@ -124,9 +124,9 @@ npm run dev:h5
 
 ## Android 桌面小组件
 
-小组件源码位于 `src/uni_modules/lakeside-widget`，使用 Kotlin、UTS、RemoteViews 和 WorkManager。保存课表后同步本地快照，支持桌面添加、手动刷新及进入课表。
+小组件源码位于 `src/uni_modules/lakeside-widget`，使用 Kotlin、UTS、RemoteViews 和 Android AlarmManager。保存课表后同步本地快照，支持桌面添加、手动刷新及进入课表。
 
-周期刷新受系统省电策略影响，不保证上下课准点更新；一键添加是否可用取决于桌面支持，也可从系统小组件列表手动添加。
+后台按已确认课表预约下一次上课或下课，紧凑版和宽松版一起更新。「设置 → 桌面小组件」可查看下次预约时间。Android 12 及以上未允许「闹钟和提醒」时仍会预约，系统可能延后送达。一键添加是否可用取决于桌面支持，也可从系统小组件列表手动添加。
 
 - [小组件架构、功能与调试](docs/android-widgets.md)
 - [正式 APK 打包与检查](docs/android-widget-release.md)

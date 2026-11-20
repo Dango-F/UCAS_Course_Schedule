@@ -69,6 +69,16 @@ async function main() {
     const value = () => evaluate("Number(document.querySelector('.clarity-slider').getAttribute('aria-valuenow'))");
     const filter = () => evaluate("getComputedStyle(document.querySelector('#liquid-nav-root .glass-surface')).backdropFilter");
     const previewFilter = () => evaluate("getComputedStyle(document.querySelector('#glass-material-preview .glass-surface')).backdropFilter");
+    const selectorOptics = root => evaluate(`(() => {
+      const selector = document.querySelector(${JSON.stringify(root)}+' .glass-selection');
+      return {
+        blurNodes:selector.querySelectorAll('feGaussianBlur').length,
+        filter:getComputedStyle(selector.firstElementChild).backdropFilter,
+        strength:Number(selector.querySelector('feDisplacementMap').getAttribute('scale')),
+        map:selector.querySelector('feImage').getAttribute('href')
+      };
+    })()`);
+    const formalSelector = '#liquid-nav-root', previewSelector = '#glass-material-preview';
     const materialOnly = value => value.replace(/\s*url\([^)]*\)/,'');
     const shot = async (name,clip) => {
       const {data} = await send('Page.captureScreenshot',{format:'png',...(clip?{clip:{...clip,scale:1}}:{})});
@@ -82,7 +92,13 @@ async function main() {
       await sleep(120);
     };
     await waitFor("Boolean(document.querySelector('#liquid-nav-root[data-glass-renderer]'))");
-    await sleep(100);
+    // The initial fallback tint transitions to the stored material for 200 ms.
+    await waitFor(`(() => {
+      const root = document.querySelector('#liquid-nav-root');
+      const face = root.querySelector('.glass-selection > uni-view');
+      const rgba = getComputedStyle(face, '::before').backgroundColor.match(/[0-9.]+/g);
+      return Math.abs(Number(rgba[3]) - Number(root.style.getPropertyValue('--glass-selection-alpha'))) < .003;
+    })()`);
     // Tint must not change either the resting or pressed transparency, nor
     // the outer lens. Check effective alpha rather than opacity alone.
     const restingMaterial = await evaluate(`(() => {
@@ -99,9 +115,9 @@ async function main() {
     })()`);
     for (const sample of restingMaterial.samples) {
       assert.deepEqual(sample.channels.slice(0,3),[227,227,227]);
-      assert.ok(Math.abs(sample.channels[3]-restingMaterial.alpha)<.003,'tint retains clarity alpha');
+      assert.ok(Math.abs(sample.channels[3]-restingMaterial.alpha)<.003,'tint retains clarity alpha: '+JSON.stringify(sample.channels)+' / '+restingMaterial.alpha);
       assert.equal(sample.opacity,1,'whole-face tint remains stable during motion');
-      assert.ok(sample.channels[3]*sample.opacity<.03,'no opaque resting fill');
+      assert.ok(sample.channels[3]*sample.opacity<.05,'the default tint is under 5% opacity');
       const brightness=Number(sample.selectionFilter.match(/brightness\(([0-9.]+)\)/)?.[1]);
       assert.ok(Math.abs(brightness-.94)<.0001,'pressure never raises the whole-face exposure');
     }
@@ -114,12 +130,31 @@ async function main() {
     await waitFor("Boolean(document.querySelector('.clarity-slider'))");
     await waitFor("Boolean(document.querySelector('#glass-material-preview [data-glass-renderer]'))");
     await sleep(650);
-    assert.equal(await value(),100);
-    assert.match(await filter(),/blur\(0\.2px\)/);
+    assert.equal(await value(),75);
+    assert.match(await filter(),/blur\(0\.71px\)/,'default 75 restores the former backdrop blur');
+    const defaultFilter = materialOnly(await filter());
     assert.equal(materialOnly(await previewFilter()),materialOnly(await filter()));
+    const defaultOptics = await selectorOptics(formalSelector);
+    assert.equal(defaultOptics.blurNodes,0,'default clarity has no rim blur');
+    assert.doesNotMatch(defaultOptics.filter,/blur\(/);
+    assert.equal((await selectorOptics(previewSelector)).blurNodes,defaultOptics.blurNodes);
     assert.equal(await evaluate("(()=>{const ids=[...document.querySelectorAll('filter')].map(e=>e.id);return ids.length===4&&new Set(ids).size===4})()"),true,'real and preview outer/selector filters must have unique ids');
     assert.equal(await evaluate("document.querySelector('.clarity-value').textContent.includes('%')"),false,'clarity is a visual level, not transmission percentage');
     await shot('settings-default');
+
+    const previewWeights = await evaluate(`(() => {
+      const tabs = Array.from(document.querySelectorAll('#glass-material-preview [data-nav-index]'));
+      const idleClasses = tabs.map(tab => tab.className);
+      tabs[1].click();
+      // Android uni-button restores these classes when its touch highlight ends.
+      tabs.forEach((tab, i) => { tab.className = idleClasses[i]; });
+      const weights = tabs.map(tab => getComputedStyle(tab).fontWeight);
+      tabs[0].click();
+      return weights;
+    })()`);
+    assert.deepEqual(previewWeights, ['500', '650', '500'], 'only the selected preview label stays bold after touch');
+    checks.push('selected preview label keeps its weight when the native button restores its touch classes');
+    await sleep(550);
 
     if(process.argv.includes('--touch-light-only')){
       const toggle='[data-glass-touch-light-setting]',preview='#glass-material-preview .preview-lens-root',actual='#liquid-nav-root';
@@ -130,7 +165,9 @@ async function main() {
         await touch('touchStart',p.x,p.y);await sleep(900);return light(selector);
       };
       const off=async()=>{await click(toggle);await waitFor(`document.querySelector('${toggle}').getAttribute('aria-checked')==='false'`);await sleep(100)};
-      assert.equal(await evaluate(`document.querySelector('${toggle}').getAttribute('aria-checked')`),'true','light defaults on');
+      assert.equal(await evaluate(`document.querySelector('${toggle}').getAttribute('aria-checked')`),'false','light defaults off');
+      await click(toggle);
+      await waitFor(`document.querySelector('${toggle}').getAttribute('aria-checked')==='true'`);
       const enabled=await hold(preview);assert.ok(enabled.alpha>.5&&enabled.mass>0,'preview actually renders the light while enabled');
       await off();const interrupted=await light(preview);
       assert.equal(interrupted.alpha,0,'switching off interrupts an active reflection immediately');assert.equal(interrupted.mass,0,'switching off clears the canvas');
@@ -165,7 +202,12 @@ async function main() {
     for(let i=1;i<=8;i++){await sleep(25);await touch('touchMove',drag.x+(drag.end-drag.x)*i/8,drag.y)}
     await sleep(140);
     assert.ok(Math.abs(await value()-25)<=1,'real touch updates value before release');
-    assert.ok(!/blur\(0\.2px\)/.test(await filter()),'material follows changing event');
+    assert.ok(Number((await filter()).match(/blur\(([\d.]+)px\)/)?.[1]) > 1.8,'the live slider increases backdrop blur before release');
+    assert.equal(materialOnly(await previewFilter()),materialOnly(await filter()));
+    assert.ok(await evaluate("Number(document.querySelector('#liquid-nav-root').style.getPropertyValue('--glass-surface-alpha')) > .15"),'the coating follows the live slider');
+    const draggedOptics = await selectorOptics(formalSelector);
+    assert.deepEqual(draggedOptics,defaultOptics,'the backdrop slider leaves the selector filter, map and strength intact');
+    assert.equal((await selectorOptics(previewSelector)).blurNodes,draggedOptics.blurNodes);
     assert.equal(await evaluate('window.clarityWrites'),0,'no synchronous preference saves during dragging');
     assert.equal(await evaluate('window.mapWrites'),0,'no displacement map regeneration during dragging');
     await touch('touchEnd'); await sleep(180);
@@ -181,39 +223,67 @@ async function main() {
     const savedValue=await value();
     await touch('touchStart',compareButton.x,compareButton.y);await sleep(160);
     assert.equal(await evaluate("document.querySelector('#glass-material-preview').dataset.comparing"),'true');
-    assert.match(await previewFilter(),/blur\(0\.2px\)/);
+    assert.equal(materialOnly(await previewFilter()),defaultFilter);
+    assert.equal((await selectorOptics(previewSelector)).blurNodes,defaultOptics.blurNodes);
+    assert.deepEqual(await selectorOptics(formalSelector),draggedOptics);
     assert.equal(await filter(),actualFilter,'comparison must not change the real navigation');
     assert.equal(await value(),savedValue,'comparison must not change the chosen preference');
     assert.equal(await evaluate('window.clarityWrites'),1,'comparison must not persist default');
     assert.ok(!currentPixels.equals(await shot('sample-default-comparison',stage)),'static sample backdrop visibly changes, excluding captions and controls');
     await touch('touchEnd');await sleep(100);
     assert.equal(materialOnly(await previewFilter()),materialOnly(actualFilter));
+    assert.equal((await selectorOptics(previewSelector)).blurNodes,draggedOptics.blurNodes);
     await touch('touchStart',compareButton.x,compareButton.y);await touch('touchCancel');await sleep(100);
     assert.equal(await evaluate("document.querySelector('#glass-material-preview').dataset.comparing"),'false');
     await evaluate("document.querySelector('.glass-compare').focus()");
     await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
-    assert.match(await previewFilter(),/blur\(0\.2px\)/);
+    assert.equal(materialOnly(await previewFilter()),defaultFilter);
     await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});
     assert.equal(materialOnly(await previewFilter()),materialOnly(actualFilter));
     checks.push('live sample uses identical material, unique SVG ids, visible optical difference; held comparison restores on release/cancel/keyboard without saving or changing real nav');
 
     await key('Home','Home',36);
     assert.equal(await value(),0);assert.match(await filter(),/blur\(2\.4px\)/);
+    assert.equal((await selectorOptics(formalSelector)).blurNodes,0);
     await shot('settings-frosted');
     await send('Page.reload');
     await waitFor("Boolean(document.querySelector('.week-select'))");
     await waitFor("Boolean(document.querySelector('#liquid-nav-root[data-glass-renderer]'))");
-    assert.match(await filter(),/blur\(2\.4px\)/,'zero restores on cold page load');
+    assert.match(await filter(),/blur\(2\.4px\)/,'maximum blur restores on cold page load');
+    assert.equal((await selectorOptics(formalSelector)).blurNodes,0);
     await click('[data-nav-index="2"]');await waitFor("Boolean(document.querySelector('[data-settings-entry=\"appearance\"]'))");
     await click('[data-settings-entry="appearance"]');await waitFor("Boolean(document.querySelector('.clarity-slider'))");
     assert.equal(await value(),0);
     await key('End','End',35);
-    assert.equal(await value(),100);assert.match(await filter(),/blur\(0\.2px\)/);
+    assert.equal(await value(),100);assert.doesNotMatch(await filter(),/blur\(/);
+    assert.doesNotMatch(await previewFilter(),/blur\(/);
     await key('ArrowLeft','ArrowLeft',37);assert.equal(await value(),99);
     await key('PageDown','PageDown',34);assert.equal(await value(),89);
     await click('.clarity-reset');await sleep(120);
-    assert.equal(await value(),100);assert.match(await filter(),/blur\(0\.2px\)/);
+    assert.equal(await value(),75);assert.equal(materialOnly(await filter()),defaultFilter);
     checks.push('keyboard endpoints/steps, zero-value persistence across reload, restore default');
+
+    if (process.argv.includes('--rim-clarity-only')) {
+      await click('[data-nav-motion="flow"]');
+      await waitFor("document.querySelector('#liquid-nav-root .glass-selection svg') && !document.querySelector('#liquid-nav-root').classList.contains('is-hop')");
+      const flowDefault = await selectorOptics(formalSelector);
+      assert.equal(flowDefault.blurNodes,0);
+      await key('Home','Home',36);
+      assert.match(await filter(),/blur\(2\.4px\)/);
+      assert.equal(materialOnly(await previewFilter()),materialOnly(await filter()));
+      assert.deepEqual(await selectorOptics(formalSelector),flowDefault);
+      assert.equal((await selectorOptics(previewSelector)).blurNodes,0);
+      await key('End','End',35);
+      assert.doesNotMatch(await filter(),/blur\(/);
+      assert.doesNotMatch(await previewFilter(),/blur\(/);
+      assert.deepEqual(await selectorOptics(formalSelector),flowDefault);
+      assert.equal((await selectorOptics(previewSelector)).blurNodes,0);
+      assert.deepEqual(errors,[]);
+      checks.push('hop and flow adjust backdrop blur in sync with the preview and keep navigation artwork free of blur');
+      console.log(JSON.stringify({checks,errors},null,2));
+      await send('Browser.close',{},false);
+      return;
+    }
 
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-transparency',value:'reduce'}]});
     await sleep(100);await key('End','End',35);
@@ -224,18 +294,23 @@ async function main() {
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-contrast',value:'more'}]});
     await sleep(100);assert.equal(await filter(),'none');
     await send('Emulation.setEmulatedMedia',{features:[]});await sleep(120);
-    assert.match(await filter(),/blur\(0\.2px\)/);
+    assert.doesNotMatch(await filter(),/blur\(/);
     await click('.clarity-reset');await sleep(120);
     checks.push('system reduced transparency and high contrast override the slider, user value resumes afterwards');
 
     for(const width of [320,374,375,390,768]){
       await send('Emulation.setDeviceMetricsOverride',{width,height:844,deviceScaleFactor:1,mobile:true});await sleep(250);
-      const dimensions=await evaluate("(()=>{const read=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,width:r.width,height:r.height}};return {real:read('#liquid-nav-root .glass-bar'),preview:read('#glass-material-preview .glass-bar'),realSelection:read('#liquid-nav-root .glass-selection'),previewSelection:read('#glass-material-preview .glass-selection')}})()");
-      assert.equal(dimensions.real.width,dimensions.preview.width,'real bar matches preview width');
+      const dimensions=await evaluate("(()=>{const read=s=>{const r=document.querySelector(s).getBoundingClientRect();return {x:r.x,width:r.width,height:r.height}};return {canvasWidth:document.querySelector('.phone-canvas').clientWidth,real:read('#liquid-nav-root .glass-bar'),preview:read('#glass-material-preview .glass-bar'),realSelection:read('#liquid-nav-root .glass-selection'),previewSelection:read('#glass-material-preview .glass-selection')}})()");
+      const mainInset = width <= 374 ? 40 : 46;
+      // The grouped settings card has no border. Its preview has one extra pixel per side.
+      assert.equal(dimensions.real.width, dimensions.canvasWidth - 2 * mainInset, 'main bar keeps its original gutters');
+      assert.equal(dimensions.preview.width, dimensions.canvasWidth - 2 * (mainInset - 1), 'preview fits the grouped card');
       assert.equal(dimensions.real.height,dimensions.preview.height,'real bar matches preview height');
-      assert.equal(dimensions.realSelection.width,dimensions.previewSelection.width,'resting selector width matches preview');
+      for (const [bar, selector] of [[dimensions.real, dimensions.realSelection], [dimensions.preview, dimensions.previewSelection]]) {
+        assert.ok(Math.abs(selector.width - (bar.width - 8) / 3) < 1 / 64, 'resting selector fills one tab');
+        assert.ok(Math.abs(bar.x * 2 + bar.width - width) < 1, 'bar remains centered');
+      }
       assert.equal(dimensions.realSelection.height,dimensions.previewSelection.height,'resting selector height matches preview');
-      assert.ok(Math.abs(dimensions.real.x*2+dimensions.real.width-width)<1,'real bar remains centered');
       assert.equal(await evaluate('document.documentElement.scrollWidth'),width);
       assert.ok(await evaluate("document.querySelector('.clarity-slider').getBoundingClientRect().height")>=44);
       assert.equal(await evaluate("getComputedStyle(document.querySelector('#liquid-nav-root .nav-item')).color"),'rgb(32, 33, 38)');
@@ -253,7 +328,7 @@ async function main() {
     await waitFor("Boolean(document.querySelector('#glass-material-preview [data-glass-renderer]'))");
     assert.equal(materialOnly(await previewFilter()),materialOnly(await filter()),'preview remounts with current preference');
     checks.push('preview respects system solid mode, stays idle, removes SVG on exit, remounts cleanly');
-    checks.push('320/374/375/390/768 widths: real bar and resting selector match preview dimensions, centered; 44px slider hit area, unchanged contrast, no idle writes');
+    checks.push('320/374/375/390/768 widths: main and preview bars retain their own gutters and equal heights, centered with one-tab selectors; 44px slider hit area, unchanged contrast, no idle writes');
     assert.deepEqual(errors,[]);
     fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({checks,errors},null,2));
     console.log(JSON.stringify({checks,errors,out},null,2));

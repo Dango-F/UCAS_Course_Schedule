@@ -17,13 +17,9 @@ CSS 用该百分比定位胶囊中心；滚动和切换周不触发位置追踪�
 
 ## 导入与设置转场
 
-检查时加号入口已嵌入 ImportDashboard，并已使用 createSettingsRoute。
-本轮把重复 CSS 提取为 `settings-route.css`，设置与导入直接导入同一文件。
-两者均为 340ms，进入从右到左，退出向右；只改变 transform，阴影固定。
-退出 transitionend 后卸载，丢失事件时由原有控制器的兜底计时器收尾。
-共享减少动画规则，并在应用偏好改变时完成进行中的转场。
+设置子页和加号导入页共用 `SettingsSlide.vue`，从右侧滑入用时 340 ms，向右滑出返回用时 150 ms。过渡只改变 `transform`。
+WebView 在挂载时提交起始位置。页面收到自身的 `transitionend` 后完成转场，丢失事件时由 `createSettingsRoute` 收尾。应用选择减少动画时直接切换。
 
-加号入口原生 navigateTo/navigateBack 动画以注释留存。
 旧 pages/import/index 独立 URL 仍保留兼容返回，但关闭原生动画；加号不再经过它。
 学校登录原生 WebView 的读取、取消和释放逻辑未重写，真机登录流程仍需实机验收。
 

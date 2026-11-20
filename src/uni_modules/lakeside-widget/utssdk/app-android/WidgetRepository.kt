@@ -32,15 +32,42 @@ internal class WidgetRepository(private val context: Context) {
             manager.getAppWidgetIds(ComponentName(context, provider)).map { it to kind }
         }.sortedBy { it.first }
     }
-    fun options(id: Int, kind: String): WidgetOptions {
-        val json = try { prefs.getString("options-$id", null)?.let { JSONObject(it) } } catch (_: Exception) { null }
-        return WidgetOptions.read(kind, json, migrateLegacy = true)
+    private fun savedOptions(id: Int): JSONObject? = try {
+        prefs.getString("options-$id", null)?.let { JSONObject(it) }
+    } catch (_: Exception) { null }
+
+    private fun sharedOpacity(installed: List<Pair<Int, String>>? = null): Int = synchronized(OPTIONS_LOCK) {
+        if (prefs.contains(SHARED_OPACITY)) return@synchronized prefs.getInt(SHARED_OPACITY, WidgetOptions.DEFAULT_OPACITY)
+        val widgets = installed ?: instances()
+        // On upgrade, the oldest active card with a custom value supplies the common opacity.
+        val migrated = WidgetOptions.legacyOpacity(widgets.asSequence().mapNotNull { (id, _) -> savedOptions(id) })
+        if (widgets.isNotEmpty()) prefs.edit().putInt(SHARED_OPACITY, migrated).apply()
+        migrated
     }
-    fun saveOptions(id: Int, kind: String, raw: String) {
-        require(prefs.edit().putString("options-$id", WidgetOptions.read(kind, JSONObject(raw)).json().toString()).commit())
+
+    private fun effectiveOptions(id: Int, kind: String, opacity: Int): WidgetOptions =
+        WidgetOptions.read(kind, savedOptions(id), migrateLegacy = true).copy(opacity = opacity)
+
+    fun options(id: Int, kind: String): WidgetOptions = effectiveOptions(id, kind, sharedOpacity())
+
+    fun saveOptions(id: Int, kind: String, raw: String): Boolean = synchronized(OPTIONS_LOCK) {
+        val previous = options(id, kind)
+        val updated = previous.withChanges(kind, JSONObject(raw))
+        val opacityChanged = updated.opacity != previous.opacity
+        val displayChanged = updated.copy(opacity = previous.opacity) != previous
+        if (opacityChanged || displayChanged) {
+            val edit = prefs.edit()
+            if (opacityChanged) edit.putInt(SHARED_OPACITY, updated.opacity)
+            if (displayChanged) {
+                val displayOptions = updated.json().apply { remove("opacity") }
+                edit.putString("options-$id", displayOptions.toString())
+            }
+            require(edit.commit())
+        }
+        opacityChanged
     }
-    fun dayOffset(id: Int, now: Long): Int = try {
-        WidgetDayView.offset(prefs.getString("day-base-$id", null), prefs.getInt("day-offset-$id", 0), now)
+    fun dayOffset(id: Int, kind: String, now: Long): Int = try {
+        WidgetDayView.offset(kind, prefs.getString("day-base-$id", null), prefs.getInt("day-offset-$id", 0), now)
     } catch (_: Exception) { 0 }
     fun saveDayOffset(id: Int, offset: Int, now: Long) {
         require(offset in 0..1)
@@ -68,12 +95,22 @@ internal class WidgetRepository(private val context: Context) {
     fun state(): String {
         val (snapshot, status) = read()
         val instances = JSONArray()
-        instances().forEach { (id, kind) -> instances.put(JSONObject().put("id", id).put("kind", kind).put("options", options(id, kind).json())) }
+        val installed = instances()
+        val opacity = sharedOpacity(installed)
+        installed.forEach { (id, kind) ->
+            instances.put(JSONObject().put("id", id).put("kind", kind).put("options", effectiveOptions(id, kind, opacity).json()))
+        }
         val kinds = WidgetCapabilities.registeredKinds(context)
         return JSONObject().put("supported", kinds.isNotEmpty()).put("pinSupported", WidgetCapabilities.pinSupported(context))
             .put("availability", WidgetCapabilities.availability(context, kinds)).put("registeredKinds", JSONArray(kinds))
-            .put("packageName", context.packageName).put("nativeVersion", 2).put("revision", snapshot?.revision ?: "")
+            .put("packageName", context.packageName).put("nativeVersion", WidgetCapabilities.API_VERSION).put("revision", snapshot?.revision ?: "")
+            .put("courseRefreshNeedsPermission", WidgetCourseAlarm.needsPermission(context))
+            .put("nextCourseRefresh", WidgetCourseAlarm.scheduledAt(context).takeIf { it > 0 }?.let { WidgetClock.format(it, "M月d日 HH:mm") } ?: "")
             .put("cacheState", status).put("instances", instances).toString()
     }
-    companion object { private val LOCK = Any() }
+    companion object {
+        private val LOCK = Any()
+        private val OPTIONS_LOCK = Any()
+        private const val SHARED_OPACITY = "shared-opacity"
+    }
 }

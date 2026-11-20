@@ -31,7 +31,7 @@ describe('桌面小组件添加指引', () => {
   })
   it('成功请求不宣称添加成功，前台错误提供可操作反馈', () => {
     const state = { ...unsupportedWidgetState(), supported: true }
-    expect(widgetPinFeedback({ status: 'requested' }, state).title).toBe('已请求系统添加')
+    expect(widgetPinFeedback({ status: 'requested' }, state)).toEqual({ title: '已请求系统添加', message: '' })
     expect(widgetPinFeedback({ status: 'error', reason: 'foreground_required' }, state).message).toContain('前台')
     expect(widgetPinFeedback({ status: 'unavailable', reason: 'providers_missing' }, state).message).toContain('未被 Android 系统注册')
   })

@@ -22,15 +22,15 @@ object LakesideWidgetBridge {
             val result = try {
                 val snapshot = WidgetRepository(context).write(raw)
                 // Cache success remains success even if this launcher rejects an update.
-                WidgetUpdates.refreshAll(context)
-                JSONObject().put("ok", true).put("revision", snapshot.revision)
+                val registered = WidgetUpdates.reconcile(context, refresh = true)
+                JSONObject().put("ok", true).put("revision", snapshot.revision).put("courseRefreshReady", registered)
             } catch (_: Exception) { JSONObject().put("ok", false).put("revision", "").put("error", "小组件数据未能保存") }
             main.post { complete(result.toString()) }
         }
     }
     @JvmStatic fun getWidgetState(context: Context): String = try { WidgetRepository(context).state() } catch (_: Exception) {
         JSONObject().put("supported", false).put("pinSupported", false).put("availability", "bridge_error")
-            .put("nativeVersion", 2).put("packageName", context.packageName).put("revision", "")
+            .put("nativeVersion", WidgetCapabilities.API_VERSION).put("packageName", context.packageName).put("revision", "")
             .put("cacheState", "error").put("instances", org.json.JSONArray()).toString()
     }
     @JvmStatic fun updateWidgetOptions(context: Context, id: Int, raw: String, complete: (String) -> Unit) {
@@ -38,14 +38,21 @@ object LakesideWidgetBridge {
             val ok = try {
                 val repo = WidgetRepository(context)
                 val kind = repo.instances().firstOrNull { it.first == id }?.second ?: throw IllegalArgumentException("Removed widget")
-                repo.saveOptions(id, kind, raw)
-                WidgetUpdates.refreshOne(context, id, kind)
+                val opacityChanged = repo.saveOptions(id, kind, raw)
+                if (opacityChanged) WidgetUpdates.reconcile(context, refresh = true)
+                else WidgetUpdates.refreshOne(context, id, kind)
                 true
             } catch (_: Exception) { false }
             main.post { complete(JSONObject().put("ok", ok).toString()) }
         }
     }
-    @JvmStatic fun refreshWidgets(context: Context) { executor.execute { WidgetUpdates.refreshAll(context) } }
+    @JvmStatic fun scheduleCourseRefresh(context: Context, complete: (String) -> Unit) {
+        executor.execute {
+            val ok = try { WidgetUpdates.reconcile(context) } catch (_: Exception) { false }
+            main.post { complete(JSONObject().put("ok", ok).toString()) }
+        }
+    }
+    @JvmStatic fun openCourseRefreshSettings(context: Context): Boolean = WidgetCourseAlarm.openPermissionSettings(context)
     @JvmStatic fun requestPinWidget(context: Context, kind: String): String {
         fun result(status: String, reason: String = "") = JSONObject().put("status", status).put("reason", reason).toString()
         if (kind !in listOf("large", "small")) return result("error", "invalid_kind")

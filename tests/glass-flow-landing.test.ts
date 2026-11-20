@@ -9,7 +9,7 @@ vi.mock('../src/components/glass-touch-light.js', () => ({
   createGlassTouchLight:() => ({configure:vi.fn(),suspend:vi.fn(),destroy:vi.fn()})
 }))
 
-function fixture(reducedMotion = false, count = 3) {
+function fixture(reducedMotion = false, count = 3, allowPagePan = false) {
   let now = 0, id = 0
   const frames = new Map<number, FrameRequestCallback>()
   const style = () => {
@@ -30,7 +30,7 @@ function fixture(reducedMotion = false, count = 3) {
     requestAnimationFrame:(callback:FrameRequestCallback) => {frames.set(++id,callback);return id},cancelAnimationFrame:(key:number) => frames.delete(key)})
   const doc = Object.assign(new EventTarget(), {defaultView:win,hidden:false})
   Object.assign(root, {ownerDocument:doc,querySelector:(selector:string) => ({'.glass-bar':bar,'.glass-selection':indicator,'.glass-light':light}[selector] || {}),querySelectorAll:() => buttons})
-  let config = {activeIndex:0,navMotion:'flow',clarity:100,reducedMotion,qElastic:true}
+  let config = {activeIndex:0,navMotion:'flow',clarity:100,reducedMotion,qElastic:true,allowPagePan}
   const select = vi.fn()
   const controller = createGlassNavigation(root, config, select)
   const state = () => ({time:now,position:Number(/translate3d\(([-\d.]+)%/.exec(indicator.style.transform)?.[1]) / 100,
@@ -74,6 +74,54 @@ function fixture(reducedMotion = false, count = 3) {
   }
   return {root,indicator,win,doc,controller,frames,select,step,state,event,click,configure,arrive,wallApproach,bounds,classes}
 }
+
+describe('pressed glass in a scrollable preview', () => {
+  it.each(['hop', 'flow'])('holds %s through native pan and cancels selection on lift', navMotion => {
+    const f = fixture(false, 3, true)
+    f.configure({navMotion})
+    const point = {pointerId:17, pointerType:'touch', isPrimary:true, clientX:190, clientY:628}
+    const finger = {identifier:3, clientX:190, clientY:604}
+    const other = {identifier:8}
+    const settle = () => { for (let frame = 0; frame < 90; frame++) f.step() }
+    const pressure = () => Number(f.root.style.getPropertyValue('--glass-press'))
+    f.event(f.root, 'pointerdown', point)
+    f.event(f.root, 'touchstart', {touches:[finger], changedTouches:[finger]})
+    settle()
+    expect(pressure()).toBe(1)
+    f.event(f.doc, 'pointercancel', point)
+    f.event(f.doc, 'touchmove', {touches:[finger], changedTouches:[finger]})
+    f.event(f.doc, 'touchend', {touches:[finger], changedTouches:[other]})
+    settle()
+    expect(pressure()).toBe(1)
+    f.event(f.doc, 'touchend', {touches:[], changedTouches:[finger]})
+    settle()
+    expect(pressure()).toBe(0)
+    expect(f.select).not.toHaveBeenCalled()
+    f.event(f.root, 'pointerdown', point)
+    f.event(f.root, 'touchstart', {touches:[finger], changedTouches:[finger]})
+    f.event(f.doc, 'pointerup', point)
+    f.event(f.doc, 'touchend', {touches:[], changedTouches:[finger]})
+    expect(f.select.mock.calls).toEqual([[1]])
+    f.controller.destroy()
+  })
+
+  it.each(['touchcancel', 'blur'])('clears the held preview on a real %s', reason => {
+    const f = fixture(false, 3, true)
+    const pointer = {pointerId:5, pointerType:'touch', clientX:190, clientY:628}
+    const finger = {identifier:0, clientX:190, clientY:628}
+    f.event(f.root, 'pointerdown', pointer)
+    f.event(f.root, 'touchstart', {touches:[finger], changedTouches:[finger]})
+    f.event(f.doc, 'pointercancel', pointer)
+    for (let frame = 0; frame < 60; frame++) f.step()
+    expect(Number(f.root.style.getPropertyValue('--glass-press'))).toBe(1)
+    if (reason === 'blur') f.event(f.win, 'blur')
+    else f.event(f.doc, 'touchcancel', {touches:[], changedTouches:[finger]})
+    for (let frame = 0; frame < 100; frame++) f.step()
+    expect(Number(f.root.style.getPropertyValue('--glass-press'))).toBe(0)
+    expect(f.select).not.toHaveBeenCalled()
+    f.controller.destroy()
+  })
+})
 
 describe('Q elastic navigation switch', () => {
   it('immediately clears unpressed flow optics without moving the selector or changing its material', () => {

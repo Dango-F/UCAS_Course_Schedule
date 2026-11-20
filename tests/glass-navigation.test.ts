@@ -9,19 +9,9 @@ describe('capsule lens adapted from AndroidLiquidGlass', () => {
     expect(original.amount).toBe(10)
     expect(compact.rim).toBeCloseTo(12.4444, 3)
     expect(compact.amount).toBeCloseTo(7.7778, 3)
-    expect(compact.blur).toBeCloseTo(.6)
     expect(capsuleRefraction(180, 28, 360, 56, compact.rim, compact.amount)).toEqual([0, 0])
     expect(lensGeometry(200).amount).toBe(10)
     expect(lensGeometry(NaN)).toEqual(compact)
-  })
-  it('bounds the clear material blur at unusual sizes without changing the lens strength', () => {
-    for (const height of [-1, 0, 1, 28, 56, 72, 200, Infinity, NaN]) {
-      const geometry = lensGeometry(height)
-      expect(geometry.blur).toBeGreaterThanOrEqual(.4)
-      expect(geometry.blur).toBeLessThanOrEqual(.8)
-    }
-    expect(lensGeometry(200).blur).toBe(.8)
-    expect(lensGeometry(56).amount).toBeCloseTo(7.7778, 3)
   })
   it('leaves the interior and outside untouched', () => {
     expect(capsuleRefraction(180, 36, 360, 72)).toEqual([0, 0])

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { boundWeekPosition, createStableWeekController, settleWeek, weekDuration } from '../src/components/stable-week-motion.js'
+import { boundWeekPosition, createStableWeekController, settleWeek, weekDuration, weekReleaseEasing } from '../src/components/stable-week-motion.js'
 
 describe('V2 stable-slot decisions', () => {
   it('retains fractional distance and low-speed flick decisions without wrapping at boundaries', () => {
@@ -14,7 +14,17 @@ describe('V2 stable-slot decisions', () => {
   it('gives slow releases a gentler finish and short flicks a quicker finish', () => {
     expect(weekDuration(200, 390, 0)).toBeGreaterThan(weekDuration(200, 390, 1))
     expect(weekDuration(0.1, 390, 0)).toBe(0)
-    expect(weekDuration(5, 390, 0)).toBeGreaterThanOrEqual(120)
+    expect(weekDuration(5, 390, 1.2)).toBe(50)
+    expect(weekDuration(195, 390, 0)).toBe(82)
+    expect(weekDuration(390, 390, 0)).toBe(100)
+  })
+  it('starts moving at the painted finger speed in either direction and stops at the destination', () => {
+    for (const [distance, duration, speed] of [[-80, 170, -.61], [40, 180, 1.5], [100, 200, -.8]]) {
+      const curve = weekReleaseEasing(distance, duration, speed)
+      const [x1, y1, x2, y2] = curve.slice('cubic-bezier('.length, -1).split(',').map(Number)
+      expect(distance / duration * y1 / x1).toBeCloseTo(Math.sign(distance) === Math.sign(speed) ? speed : 0)
+      expect((1 - y2) / (1 - x2)).toBe(0)
+    }
   })
 })
 
@@ -93,6 +103,26 @@ describe('V2 view-layer compositor lifecycle', () => {
     expect(panelObservation.attributeFilter).toEqual(['data-calendar-panel', 'data-calendar-view'])
     f.controller.destroy()
   })
+  it('hands the release to the browser without reading layout and rejects its stale completion after interruption', () => {
+    const f = fixture()
+    const effect = { onfinish: null as null | (() => void), cancel: vi.fn() }
+    const animate = vi.fn(() => effect)
+    Object.assign(f.track, { animate })
+    f.touch('touchstart', 300); f.touch('touchmove', 50)
+    const reads = f.reads()
+    f.touch('touchend', 50)
+    expect(f.reads()).toBe(reads)
+    expect(animate).toHaveBeenCalledOnce()
+    expect(f.notify).toHaveBeenCalledWith({ week: 4, revision: 0 })
+    const stale = effect.onfinish!
+    visibleX = -1040
+    f.touch('touchstart', 220)
+    expect(effect.cancel).toHaveBeenCalledOnce()
+    stale()
+    expect(f.attrs['data-motion-phase']).toBe('tracking')
+    expect(f.track.style.transform).toBe('translate3d(-1040px,0,0)')
+    f.controller.destroy()
+  })
   it('blocks gaps while neighbours prepare and admits them as soon as they are ready', () => {
     const f = fixture(3, true)
     f.ready([1, 3, 5])
@@ -108,9 +138,24 @@ describe('V2 view-layer compositor lifecycle', () => {
     const f = fixture(3, true)
     f.scrollers.forEach(scroller => { scroller.scrollTop = 55 })
     f.touch('touchstart', 300)
+    expect(f.scrollers[0].scrollTop).toBe(55)
+    f.touch('touchmove', 295)
     expect(f.scrollers[0].scrollTop).toBe(0)
     expect(f.scrollers[2].scrollTop).toBe(55)
     expect(f.cachedScroller.scrollTop).toBe(77)
+    f.controller.destroy()
+  })
+  it.each(['touchend', 'touchcancel'])('releases a vertical scroll and accepts the next horizontal swipe after %s', finish => {
+    const f = fixture(3, true)
+    f.touch('touchstart', 300, 100)
+    f.touch('touchmove', 300, 104)
+    expect(f.handlers.has('touchmove')).toBe(true)
+    f.touch('touchmove', 301, 112)
+    expect(f.handlers.has('touchmove')).toBe(false)
+    expect(f.notify).not.toHaveBeenCalled()
+    f.touch(finish, 301, 145)
+    f.touch('touchstart', 300); f.touch('touchmove', 50); f.touch('touchend', 50)
+    expect(f.notify).toHaveBeenCalledWith({ week: 4, revision: 0 })
     f.controller.destroy()
   })
   it('announces the target at every release even when the next gesture interrupts before halfway', () => {

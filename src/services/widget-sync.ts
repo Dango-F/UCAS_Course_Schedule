@@ -3,10 +3,11 @@ import { buildWidgetSnapshot, parseWidgetAction, type WidgetAction, type WidgetK
 import type { Schedule } from '../domain/schedule'
 
 export interface WidgetNativePort {
-  syncSnapshot(json: string): Promise<{ ok: boolean; revision: string; error?: string }>
+  syncSnapshot(json: string): Promise<{ ok: boolean; revision: string; error?: string; courseRefreshReady?: boolean }>
   getWidgetState(): WidgetState
-  updateWidgetOptions(id: number, options: WidgetOptions): Promise<boolean>
-  refreshWidgets(): void
+  updateWidgetOptions(id: number, options: Partial<WidgetOptions>): Promise<boolean>
+  scheduleCourseRefresh(): Promise<boolean>
+  openCourseRefreshSettings(): boolean
   requestPinWidget(kind: WidgetKind): WidgetPinResult
   consumePendingAction(): string | null
 }
@@ -14,7 +15,8 @@ export const unsupportedWidgetState = (): WidgetState => ({ supported: false, pi
 const unsupported: WidgetNativePort = {
   syncSnapshot: async () => ({ ok: false, revision: '', error: '此平台暂不支持桌面小组件' }),
   getWidgetState: unsupportedWidgetState, updateWidgetOptions: async () => false,
-  refreshWidgets() {}, requestPinWidget: () => ({ status: 'unavailable', reason: 'unsupported' }), consumePendingAction: () => null,
+  scheduleCourseRefresh: async () => false, openCourseRefreshSettings: () => false,
+  requestPinWidget: () => ({ status: 'unavailable', reason: 'unsupported' }), consumePendingAction: () => null,
 }
 let native: WidgetNativePort = unsupported
 let queue = Promise.resolve()
@@ -35,17 +37,24 @@ export function syncSavedWidgetSchedule(schedule: Schedule | null, force = false
   queue = queue.then(async () => {
     widgetSyncStatus.value = { state: 'syncing', message: '正在同步课表', at: Date.now() }
     try {
-      if (!force && getWidgetState().revision === snapshot.revision) native.refreshWidgets()
+      let registered: boolean
+      if (!force && getWidgetState().revision === snapshot.revision) registered = await native.scheduleCourseRefresh()
       else {
         const result = await native.syncSnapshot(json)
         if (!result.ok) throw new Error(result.error || '小组件同步失败')
+        registered = result.courseRefreshReady !== false
       }
-      widgetSyncStatus.value = { state: 'synced', message: snapshot.semester ? '小组件已同步' : '尚未导入真实课表', at: Date.now() }
+      widgetSyncStatus.value = registered
+        ? { state: 'synced', message: snapshot.semester ? '小组件已同步' : '尚未导入真实课表', at: Date.now() }
+        : { state: 'error', message: '课表已同步，系统未能预约上下课刷新，请重新同步。', at: Date.now() }
     } catch {
       widgetSyncStatus.value = { state: 'error', message: '课表已保存，小组件同步失败，请重新同步', at: Date.now() }
     }
   })
   return queue
+}
+export function openCourseRefreshSettings(): boolean {
+  try { return native.openCourseRefreshSettings() } catch { return false }
 }
 export function refreshWidgetActions(): void {
   try {
@@ -73,6 +82,6 @@ export function requestPinWidget(kind: WidgetKind): WidgetPinResult {
     return result
   } catch { return { status: 'error', reason: 'native_error' } }
 }
-export async function updateWidgetOptions(id: number, options: WidgetOptions): Promise<boolean> {
+export async function updateWidgetOptions(id: number, options: Partial<WidgetOptions>): Promise<boolean> {
   try { return await native.updateWidgetOptions(id, options) } catch { return false }
 }

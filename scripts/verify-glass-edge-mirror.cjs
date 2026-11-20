@@ -45,10 +45,13 @@ async function main() {
       pending.set(id, { resolve:value=>{clearTimeout(timeout);resolve(value)}, reject:error=>{clearTimeout(timeout);reject(error)} });
       socket.send(JSON.stringify({ id, method, params, ...(attached && sessionId ? { sessionId } : {}) }));
     });
-    const { targetId } = await send('Target.createTarget', { url: 'about:blank' }, false);
+    const { targetInfos } = await send('Target.getTargets', {}, false);
+    const { targetId } = targetInfos.find(target => target.type === 'page');
     ({ sessionId } = await send('Target.attachToTarget', { targetId, flatten: true }, false));
     await send('Runtime.enable');
     await send('Page.enable');
+    await send('Page.bringToFront');
+    await send('Emulation.setFocusEmulationEnabled', { enabled: true });
     await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
     const evaluate = async expression => {
@@ -73,7 +76,7 @@ async function main() {
     const fold=optics.mirrorFoldWidth(rim,amount);
     // Compare with the immediately previous 7px sharp fold, not older trials.
     const oldFold=Math.min(rim,amount,7),oldScale=2*amount*(2+.6+.2);
-    const oldMaps=optics.SPECTRAL_SAMPLES.map(s=>{
+    const oldMap=(()=>{
       const data=new Uint8ClampedArray(w*h*4),radius=h/2,segment=w/2-radius;
       for(let y=0;y<h;y++)for(let x=0;x<w;x++){
         const cx=x+.5-w/2,cy=y+.5-h/2,dx=cx-Math.max(-segment,Math.min(segment,cx));
@@ -82,16 +85,17 @@ async function main() {
         const z=Math.max(0,oldFold-inside),l=Math.min(1,oldFold/2),ny=length?cy/length:0,compression=inside>0&&inside<oldFold?.6*(z+l*Math.expm1(-z/l))+.2*z**3/oldFold**2:0;
         data[i]=255*(.5-(length?delta*dx/length:0)/oldScale);data[i+1]=255*(.5-(delta*ny+compression*ny**3)/oldScale);data[i+2]=128;data[i+3]=255;
       }return Array.from(data);
-    });
-    const applyOld=()=>evaluate('('+(function(maps,w,h,scale){
+    })();
+    const applyOld=()=>evaluate('('+(function(pixels,w,h,scale){
       const filter=document.querySelector('svg[data-edge-mirror=true]'),images=filter.querySelectorAll('feImage');
       const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');
-      maps.forEach((p,i)=>{const data=ctx.createImageData(w,h);data.data.set(p);ctx.putImageData(data,0,0);images[i].setAttribute('href',c.toDataURL())});
+      const data=ctx.createImageData(w,h);data.data.set(pixels);ctx.putImageData(data,0,0);
+      const url=c.toDataURL();images.forEach(image=>image.setAttribute('href',url));
       filter.querySelectorAll('feDisplacementMap').forEach(e=>e.setAttribute('scale',scale));
-    }).toString()+')('+JSON.stringify(oldMaps)+','+w+','+h+','+oldScale+')');
+    }).toString()+')('+JSON.stringify(oldMap)+','+w+','+h+','+oldScale+')');
     const restoreWide=()=>evaluate("(()=>{const svg=document.querySelector('svg[data-edge-mirror=true]');svg.querySelectorAll('feImage').forEach((e,i)=>e.setAttribute('href',window.mirrorMaps[i]));svg.querySelectorAll('feDisplacementMap').forEach((e,i)=>e.setAttribute('scale',window.mirrorScales[i]))})()");
-    assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root feDisplacementMap').length"),14);
-    assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root feImage').length"),14);
+    assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root feDisplacementMap').length"),8);
+    assert.equal(await evaluate("document.querySelectorAll('#liquid-nav-root feImage').length"),8);
     assert.equal(await evaluate("document.querySelector('#liquid-nav-root svg[data-edge-mirror=true]')?.dataset.opticalMode"),'vertical-compressed-fold');
     assert.equal(await evaluate("document.querySelector('#liquid-nav-root svg[data-edge-mirror=true]')?.dataset.depthEffect"),'false');
     assert.equal(await evaluate("document.querySelector('.glass-selection svg')?.dataset.edgeMirror"),'false');
@@ -298,7 +302,7 @@ async function main() {
     await send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});await sleep(500);
     assert.equal(await evaluate('window.mapEncodes'),0,'no map encodes during gestures');
     assert.deepEqual(errors,[]);
-    fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({fold,oldFold,rampProfile,oldRampProfile,reflectedJoin,originalJoin,textAdjacentRowDifference,imageAdjacentRowDifference,delta,passing,imageResult,motion:{frames:65,step:.75,scale:2,encodeCount:0},checks:['same 14 samples and 14 maps','outer samples aligned, selector refraction retained','compressed outer rim and 1.5px rounded turn','4px PNG unfolds, width unchanged','7px curved fold without alpha crossfade','PNG, text and blue button captured in fractional-pixel motion','zero scroll/gesture encodes'],errors},null,2));
+    fs.writeFileSync(path.join(out,'report.json'),JSON.stringify({fold,oldFold,rampProfile,oldRampProfile,reflectedJoin,originalJoin,textAdjacentRowDifference,imageAdjacentRowDifference,delta,passing,imageResult,motion:{frames:65,step:.75,scale:2,encodeCount:0},checks:['one shared mirrored displacement and seven distinct selector displacements','outer samples aligned, selector refraction retained','compressed outer rim and 1.5px rounded turn','4px PNG unfolds, width unchanged','7px curved fold without alpha crossfade','PNG, text and blue button captured in fractional-pixel motion','zero scroll/gesture encodes'],errors},null,2));
     console.log(JSON.stringify({fold,rampProfile,reflectedJoin,originalJoin,delta,errors,out},null,2));
     await send('Browser.close',{},false);
   } finally {socket?.close();child.kill();server.close()}
