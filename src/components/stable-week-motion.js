@@ -131,7 +131,19 @@ export function createStableWeekController(root, initialConfig, notify, editSlot
     root.setAttribute('data-motion-phase', 'settling')
     const easing = weekReleaseEasing(distance, duration, trackVelocity)
     if (duration && track.animate) {
-      releaseAnimation = track.animate([{ transform: translation(position) }, { transform: translation(destination) }], { duration, easing })
+      const frames = [{ offset: 0, transform: translation(position) }]
+      if (destination !== reported) {
+        // Offsets are progress *after* the velocity-matched easing. Follow the
+        // original path to 75%, then trail it by about 1% before drawing level.
+        // The segment tangents match at both joins; the outer easing stops the track.
+        const at = fraction => translation(position + (destination - position) * fraction)
+        frames.push(
+          { offset: 0.75, transform: at(0.75), easing: 'cubic-bezier(.27,.30,.64,.68)' },
+          { offset: 0.85, transform: at(0.84), easing: 'cubic-bezier(.32,.24,.68,.76)' }
+        )
+      }
+      frames.push({ offset: 1, transform: translation(destination) })
+      releaseAnimation = track.animate(frames, { duration, easing })
       releaseAnimation.onfinish = () => finish(token)
     } else if (duration) {
       void track.offsetWidth

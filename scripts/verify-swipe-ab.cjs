@@ -277,11 +277,42 @@ async function main() {
           });
           window.slowObserver.observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['style'] });
         })()`);
+        if (!comparisonMode) {
+          // Seek the real release on the browser timeline so display refresh rate
+          // cannot hide its brief pickup. Restore the playhead within the same event.
+          await evaluate(`document.querySelector('.calendar-native').addEventListener('touchend', () => {
+            const track = document.querySelector('.week-track');
+            const animation = track.getAnimations()[0];
+            const effect = animation.effect;
+            const playhead = animation.currentTime;
+            const duration = effect.getTiming().duration;
+            const frames = effect.getKeyframes();
+            const from = new DOMMatrixReadOnly(frames[0].transform).m41;
+            const to = new DOMMatrixReadOnly(frames.at(-1).transform).m41;
+            window.weekPull = { duration, remaining: Math.abs(to - from), samples: [] };
+            for (let i = 0; i < 100; i++) {
+              animation.currentTime = i * duration / 100;
+              const x = new DOMMatrixReadOnly(getComputedStyle(track).transform).m41;
+              window.weekPull.samples.push({ position: (x - from) / (to - from), baseline: effect.getComputedTiming().progress });
+            }
+            animation.currentTime = playhead ?? 0;
+          }, { capture: true, once: true })`);
+        }
         await touch('touchEnd'); await sleep(55);
         assert.equal(await shownWeek(), 4, `v${version} slow release also updates headings without waiting for the endpoint`);
         assert.match(await evaluate(`(()=>{const e=document.querySelector('.week-track');return e.getAnimations().find(a=>a.effect.getKeyframes().some(f=>f.transform))?.effect.getTiming().easing || e.style.transition})()`), /cubic-bezier/, `v${version} uses compositor settling`);
         await sleep(350);
         const release = await evaluate(`window.slowObserver.disconnect(); ({ ...window.slowRelease, visibleRetained: window.visibleReleasePanels.every(panel => panel.isConnected) })`);
+        if (!comparisonMode) {
+          const { samples, duration, remaining } = await evaluate('window.weekPull');
+          const step = i => samples[i].position - samples[i - 1].position;
+          assert.equal(duration, Math.round(240 * Math.sqrt(remaining / 390)), 'held release keeps its distance-based duration');
+          assert.ok(samples.every(({ position, baseline }, i) =>
+            Math.abs(position - baseline) < (baseline < 0.75 ? 0.0001 : 0.015) &&
+            position <= 1 && (i === 0 || step(i) >= 0)), 'only the tail changes, within 1.5% of travel');
+          assert.ok(step(80) > step(76) * 1.08 && step(99) < step(80) / 10, 'late pickup followed by a soft stop');
+          checks.push('held release preserves its duration, gently accelerates near alignment and settles monotonically');
+        }
         assert.ok(release.styleWrites <= 3, `v${version} does not write the transform every release frame`);
         assert.equal(release.visibleChanges, 0, `v${version} preserves visible course DOM while preparing distant weeks`);
         assert.ok(release.visibleRetained, `v${version} does not replace either visible week during compositor settling`);
